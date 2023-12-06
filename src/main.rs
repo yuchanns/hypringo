@@ -19,10 +19,21 @@ async fn main() -> Result<()> {
 
     let bind_path = temp_dir().join(format!(
         "hypr/{}/.socket2.sock",
-        env::var("HYPRLAND_INSTANCE_SIGNATURE")?
+        env::var("HYPRLAND_INSTANCE_SIGNATURE").unwrap_or_else(|_| {
+            panic!(
+                "Unable to retrieve the env var HYPRLAND_INSTANCE_SIGNATURE, is Hyprland running?"
+            )
+        })
     ));
     debug!("hyprland socket2 path: {:?}", bind_path);
-    let stream = UnixStream::connect(bind_path).await?;
+    let stream = UnixStream::connect(bind_path.clone())
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "Unable to establish the connection at {:?}, is Hyprland running?",
+                bind_path
+            )
+        });
     let mut reader = BufReader::new(stream);
     loop {
         let mut data = Vec::new();

@@ -11,7 +11,7 @@ mod dispatch;
 mod keyword;
 mod monitors;
 
-pub use dispatch::*;
+// pub use dispatch::*;
 pub use keyword::*;
 pub use monitors::*;
 
@@ -27,7 +27,7 @@ impl Hyprctl {
         Ok(UnixStream::connect(self.bind_path.clone()).await?)
     }
     pub async fn write(&self, src: String) -> Result<String> {
-        debug!("write: {:?}", src);
+        debug!("write: {src}");
         let mut stream = self.connect().await?;
         stream.write_all(src.as_bytes()).await?;
         stream.flush().await?;

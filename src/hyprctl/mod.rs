@@ -11,10 +11,12 @@ use tokio::{
 };
 
 mod dispatch;
+mod event_listener;
 mod keyword;
 mod monitors;
 
 // pub use dispatch::*;
+pub use event_listener::*;
 pub use keyword::*;
 pub use monitors::*;
 
@@ -26,12 +28,9 @@ impl Hyprctl {
     pub fn new(bind_path: PathBuf) -> Self {
         Hyprctl { bind_path }
     }
-    pub async fn connect(&self) -> Result<UnixStream> {
-        Ok(UnixStream::connect(self.bind_path.clone()).await?)
-    }
     pub async fn write(&self, src: String) -> Result<String> {
         debug!("write: {src}");
-        let mut stream = self.connect().await?;
+        let mut stream = UnixStream::connect(self.bind_path.join(".socket.sock")).await?;
         stream.write_all(src.as_bytes()).await?;
         stream.flush().await?;
         let mut data = String::new();
@@ -48,7 +47,7 @@ impl Default for Hyprctl {
                 "Unable to retrieve the env var HYPRLAND_INSTANCE_SIGNATURE, is Hyprland running?"
             )
         });
-        let bind_path = temp_dir().join(format!("hypr/{sig}/.socket.sock"));
+        let bind_path = temp_dir().join(format!("hypr/{sig}"));
         debug!("hyprland socket path: {bind_path:?}");
         Self::new(bind_path)
     }

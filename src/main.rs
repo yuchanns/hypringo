@@ -1,10 +1,7 @@
 #![feature(impl_trait_in_assoc_type)]
 mod hyprctl;
 
-use std::{
-    env::{self, temp_dir},
-    path::PathBuf,
-};
+use std::env::{self, temp_dir};
 
 use anyhow::{anyhow, Result};
 use tokio::{
@@ -51,7 +48,7 @@ async fn main() -> Result<()> {
         tokio::spawn(async move {
             let bind_path = temp_dir().join(format!("hypr/{sig}/.socket.sock"));
             debug!("hyprland socket path: {bind_path:?}");
-            match process(bind_path, event).await {
+            match process(event).await {
                 Ok(_) => {}
                 Err(e) => {
                     error!("Unable to process event: {e:?}");
@@ -61,8 +58,8 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn process(bind_path: PathBuf, event: Event) -> Result<()> {
-    let hyprctl = Hyprctl::new(bind_path).await?;
+async fn process(event: Event) -> Result<()> {
+    let hyprctl = Hyprctl::default();
     if event.name == "monitoradded" {
         let monitor_name = event.data;
         debug!("monitor name: {monitor_name:?}");

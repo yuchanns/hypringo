@@ -1,5 +1,8 @@
 use anyhow::Result;
-use std::path::PathBuf;
+use std::{
+    env::{self, temp_dir},
+    path::PathBuf,
+};
 use tracing::debug;
 
 use tokio::{
@@ -20,8 +23,8 @@ pub struct Hyprctl {
 }
 
 impl Hyprctl {
-    pub async fn new(bind_path: PathBuf) -> Result<Self> {
-        Ok(Hyprctl { bind_path })
+    pub fn new(bind_path: PathBuf) -> Self {
+        Hyprctl { bind_path }
     }
     pub async fn connect(&self) -> Result<UnixStream> {
         Ok(UnixStream::connect(self.bind_path.clone()).await?)
@@ -35,5 +38,18 @@ impl Hyprctl {
         stream.read_to_string(&mut data).await?;
         debug!("read: {data}");
         Ok(data)
+    }
+}
+
+impl Default for Hyprctl {
+    fn default() -> Self {
+        let sig = env::var("HYPRLAND_INSTANCE_SIGNATURE").unwrap_or_else(|_| {
+            panic!(
+                "Unable to retrieve the env var HYPRLAND_INSTANCE_SIGNATURE, is Hyprland running?"
+            )
+        });
+        let bind_path = temp_dir().join(format!("hypr/{sig}/.socket.sock"));
+        debug!("hyprland socket path: {bind_path:?}");
+        Self::new(bind_path)
     }
 }

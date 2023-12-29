@@ -1,4 +1,3 @@
-#![feature(impl_trait_in_assoc_type)]
 mod hyprctl;
 
 use anyhow::Result;

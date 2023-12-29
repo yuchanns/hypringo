@@ -1,25 +1,17 @@
-use std::future::Future;
-
 use anyhow::Result;
 use serde_derive::Deserialize;
 
 use super::Hyprctl;
 
 pub trait Monitors {
-    type Output<'a>: Future<Output = Result<Vec<Monitor>>>
-    where
-        Self: 'a;
-    fn get_monitors(&self) -> Self::Output<'_>;
+    async fn get_monitors(&self) -> Result<Vec<Monitor>>;
 }
 
 impl Monitors for Hyprctl {
-    type Output<'a> = impl Future<Output = Result<Vec<Monitor>>>;
-    fn get_monitors(&self) -> Self::Output<'_> {
-        async move {
-            let data = self.write("j/monitors".to_string()).await?;
-            let monitors: Vec<Monitor> = serde_json::from_str(data.as_str())?;
-            Ok(monitors)
-        }
+    async fn get_monitors(&self) -> Result<Vec<Monitor>> {
+        let data = self.write("j/monitors".to_string()).await?;
+        let monitors: Vec<Monitor> = serde_json::from_str(data.as_str())?;
+        Ok(monitors)
     }
 }
 

@@ -47,7 +47,10 @@ impl Default for Hyprctl {
                 "Unable to retrieve the env var HYPRLAND_INSTANCE_SIGNATURE, is Hyprland running?"
             )
         });
-        let bind_path = temp_dir().join(format!("hypr/{sig}"));
+        let dir = env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| {
+            panic!("Unable to retrieve the env var XDG_RUNTIME_DIR, is Hyprland running?")
+        });
+        let bind_path = PathBuf::from(format!("{dir}/hypr/{sig}"));
         debug!("hyprland socket path: {bind_path:?}");
         Self::new(bind_path)
     }

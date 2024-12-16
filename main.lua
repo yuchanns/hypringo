@@ -3,6 +3,10 @@ local cjson = require("cjson")
 
 local hyprctl = Hyprctl.new()
 
+local execute = function(command)
+  return pcall(os.execute, command)
+end
+
 --- @param monitor table
 local handle_external_monitor = function(monitor)
   local name = monitor.name
@@ -25,16 +29,6 @@ local get_monitors = function()
   return monitors
 end
 
-for _, monitor in ipairs(get_monitors()) do
-  local name = monitor.name
-  if name == "HDMI-A-1" then
-    handle_external_monitor(monitor)
-  end
-  if name == "eDP-1" then
-    hyprctl:write(("/keyword monitor %s,%s,%s,%d"):format(name, "preferred", "0x0", 2))
-  end
-end
-
 hyprctl:register("monitoradded", function(event)
   local monitor_name = event.data
   print("monitor added: " .. monitor_name)
@@ -49,49 +43,48 @@ hyprctl:register("monitoradded", function(event)
   print("monitor not found: " .. monitor_name)
 end)
 
-local window_aliases = {
-  ["wezterm"] = "wezterm",
-  ["chromium"] = "Chrome",
-  ["firefox"] = "Firefox",
-  ["remmina"] = "Remmina",
-  ["wechat"] = "Wechat",
-}
-
 hyprctl:register("activewindow", function(event)
   local window = event.data
   print("active window: " .. window)
+  if not window then
+    return
+  end
   local windows = {}
   for w in string.gmatch(window, "[^,]+") do
     windows[#windows + 1] = w
   end
   window = windows[#windows]
-  if #windows == 1 then
-    for _, name in pairs(window_aliases) do
-      if string.match(window, name) then
-        window = name
-        break
-      end
-    end
-  end
-  if not window then
-    return
-  end
-  os.execute("eww update active_window='" .. window .. "'")
+  execute("eww update active_window='" .. window .. "'")
 end)
 
 hyprctl:register("workspace", function(event)
   local workspace = event.data
   print("active workspace: " .. workspace)
-  os.execute("eww update active_workspace='" .. workspace .. "'")
+  execute("eww update active_workspace='" .. workspace .. "'")
 end)
 
 hyprctl:register("*", function(_)
   local data, err = hyprctl:write("j/workspaces")
   if err then
     print("get monitors failed: " .. err)
-    return {}
+    return
   end
-  os.execute("eww update workspaces='" .. data .. "'")
+  execute("eww update workspaces='" .. data .. "'")
 end)
+
+-- Set monitors on startup
+for _, monitor in ipairs(get_monitors()) do
+  local name = monitor.name
+  if name == "HDMI-A-1" then
+    handle_external_monitor(monitor)
+    goto continue
+  end
+  if name == "eDP-1" then
+    hyprctl:write(("/keyword monitor %s,%s,%s,%d"):format(name, "preferred", "0x0", 2))
+    goto continue
+  end
+  print("unknown monitor: " .. name)
+  ::continue::
+end
 
 hyprctl:listen()

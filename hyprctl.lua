@@ -14,6 +14,12 @@ function Hyprctl.new(bind_path)
   return self
 end
 
+--- @class Event
+--- @field name string
+--- @field data string|nil
+
+--- @param event_name string
+--- @param callback fun(event: Event)
 function Hyprctl:register(event_name, callback)
   if not self.event_callback then
     self.event_callback = {}
@@ -74,6 +80,7 @@ function Hyprctl:listen()
   end
 end
 
+--- @param src string
 function Hyprctl:write(src)
   local client = assert(unix.stream())
   local socket_path = self.bind_path .. "/.socket.sock"

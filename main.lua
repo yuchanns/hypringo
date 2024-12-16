@@ -54,6 +54,9 @@ hyprctl:register("activewindow", function(event)
     windows[#windows + 1] = w
   end
   window = windows[#windows]
+  if not window then
+    return
+  end
   execute("eww update active_window='" .. window .. "'")
 end)
 

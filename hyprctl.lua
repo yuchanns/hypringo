@@ -3,7 +3,12 @@ local unix = require("socket.unix")
 local Hyprctl = {}
 Hyprctl.__index = Hyprctl
 
+--- @param bind_path string|nil
 function Hyprctl.new(bind_path)
+  if not bind_path then
+    bind_path = os.getenv("XDG_RUNTIME_DIR") ..
+        "/hypr/" .. os.getenv("HYPRLAND_INSTANCE_SIGNATURE")
+  end
   local self = setmetatable({}, Hyprctl)
   self.bind_path = bind_path
   return self
@@ -49,9 +54,13 @@ function Hyprctl:listen()
       if #parts > 1 then
         event.data = parts[2]
       end
-      if self.event_callback and self.event_callback[event.name] then
-        for _, callback in ipairs(self.event_callback[event.name]) do
-          callback(event)
+      -- support wildcard callback
+      local events = { event.name, "*" }
+      for _, evt in ipairs(events) do
+        if self.event_callback and self.event_callback[evt] then
+          for _, callback in ipairs(self.event_callback[evt]) do
+            callback(event)
+          end
         end
       end
     end

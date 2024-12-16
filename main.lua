@@ -61,15 +61,20 @@ hyprctl:register("activewindow", function(event)
   local window = event.data
   print("active window: " .. window)
   local windows = {}
-  for w in window:gmatch('([^,]+)') do
+  for w in string.gmatch(window, "[^,]+") do
     windows[#windows + 1] = w
   end
   window = windows[#windows]
-  for _, name in pairs(window_aliases) do
-    if string.match(window, name) then
-      window = name
-      break
+  if #windows == 1 then
+    for _, name in pairs(window_aliases) do
+      if string.match(window, name) then
+        window = name
+        break
+      end
     end
+  end
+  if not window then
+    return
   end
   os.execute("eww update active_window='" .. window .. "'")
 end)

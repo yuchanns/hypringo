@@ -37,6 +37,8 @@ hyprctl:register("monitoradded", function(event)
     if monitor.name == monitor_name then
       print("monitor found: " .. monitor_name)
       handle_external_monitor(monitor)
+      execute("eww close-all && killall eww")
+      execute("eww open-many bar builtin")
       return
     end
   end
@@ -72,6 +74,9 @@ hyprctl:register("*", function(_)
     print("get monitors failed: " .. err)
     return
   end
+  local workspaces = cjson.decode(data)
+  table.sort(workspaces, function(a, b) return a.id < b.id end)
+  data = cjson.encode(workspaces)
   execute("eww update workspaces='" .. data .. "'")
 end)
 

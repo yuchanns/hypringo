@@ -1,0 +1,6 @@
+[submodule "3rd/ltask"]
+	path = 3rd/ltask
+	url = https://github.com/cloudwu/ltask.git
+[submodule "3rd/lua"]
+	path = 3rd/lua
+	url = https://github.com/lua/lua.git

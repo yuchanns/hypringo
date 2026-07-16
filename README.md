@@ -10,3 +10,58 @@ Better Utilize Hyprland in Your Asahi Linux.
 
 </div>
 
+## 当前状态
+
+当前分支提供 Hypringo 的最小运行时骨架：单个原生可执行文件内嵌 Lua 5.5、ltask 与内部 Lua service，外部 `config.lua` 作为唯一用户入口。Hyprland、Eww 和状态协议尚未接入。
+
+## 构建
+
+需要较新的 [luamake](https://github.com/actboy168/luamake)。首次检出后初始化两个源码 submodule，再构建 release 版本：
+
+```bash
+git submodule update --init
+luamake -mode release
+```
+
+产物位于 `build/bin/hypringo`。
+
+## 配置与运行
+
+默认配置路径遵循 XDG：`$XDG_CONFIG_HOME/hypringo/config.lua`；未设置 `XDG_CONFIG_HOME` 时使用 `~/.config/hypringo/config.lua`。也可以直接传入配置文件，或用 `--config` 指定：
+
+```bash
+mkdir -p ~/.config/hypringo
+cp example/config.lua ~/.config/hypringo/config.lua
+
+build/bin/hypringo --check-config
+build/bin/hypringo main.lua
+build/bin/hypringo --config /path/to/config.lua
+```
+
+配置文件必须返回可序列化的 Lua table。运行时骨架当前只消费 `runtime.workers`：
+
+```lua
+return {
+	runtime = {
+		workers = 2,
+	},
+}
+```
+
+## systemd user service
+
+安装二进制和 unit 后，把当前 Hyprland/Wayland 会话环境导入 user manager，再启用服务：
+
+```bash
+install -Dm755 build/bin/hypringo ~/.local/bin/hypringo
+install -Dm644 contrib/systemd/hypringo.service ~/.config/systemd/user/hypringo.service
+systemctl --user import-environment WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
+systemctl --user daemon-reload
+systemctl --user enable --now hypringo.service
+```
+
+查看日志与配置错误：
+
+```bash
+journalctl --user -u hypringo.service -f
+```

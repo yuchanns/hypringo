@@ -1,5 +1,6 @@
 #include "embed.h"
 #include "host.h"
+#include "control.h"
 
 #include <lauxlib.h>
 #include <lua.h>
@@ -49,6 +50,7 @@ main(int argc, char **argv) {
 	preload(L, "ltask.bootstrap", luaopen_ltask_bootstrap);
 	preload(L, "hypringo.embed", luaopen_hypringo_embed);
 	preload(L, "hypringo.host", luaopen_hypringo_host);
+	preload(L, "hypringo.control", luaopen_hypringo_control);
 
 	lua_pushcfunction(L, traceback);
 	if (hypringo_load_embedded(L, "hypringo.runtime", "@src/lualib/runtime.lua") != LUA_OK) {

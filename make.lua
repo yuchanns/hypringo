@@ -28,8 +28,11 @@ local embedded_sources = {
 	"3rd/ltask/service/root.lua",
 	"3rd/ltask/service/timer.lua",
 	"src/lualib/config.lua",
+	"src/lualib/json.lua",
 	"src/lualib/runtime.lua",
+	"src/lualib/state.lua",
 	"src/service/main.lua",
+	"src/service/state.lua",
 }
 
 local generated_header = lm.basedir / lm.builddir / "embedded_sources.h"
@@ -60,6 +63,14 @@ lm:source_set "ltask_src" {
 	includes = {
 		"3rd/lua",
 		"3rd/ltask/src",
+		"src",
+	},
+	defines = {
+		"LTASK_EXTERNAL_OPENLIBS=hypringo_openlibs",
+	},
+	flags = {
+		"-include",
+		"luamods.h",
 	},
 }
 

@@ -13,7 +13,12 @@ local function usage()
 Options:
   --config PATH       Load configuration from PATH.
   --check-config      Validate the configuration and exit.
+  --socket PATH       Override the control socket for client commands.
   --help              Show this help.
+
+Commands:
+  status              Print the current revisioned state and exit.
+  subscribe           Stream revisioned state snapshots as JSON lines.
 ]]
 end
 
@@ -21,6 +26,10 @@ local function parse_arguments(args)
 	local options = {
 		check_config = false,
 	}
+	if args[1] == "status" or args[1] == "subscribe" then
+		options.command = args[1]
+		table.remove(args, 1)
+	end
 	local index = 1
 	while index <= #args do
 		local argument = args[index]
@@ -34,11 +43,31 @@ local function parse_arguments(args)
 			end
 			options.config_path = args[index]
 		elseif argument == "--check-config" then
+			if options.command then
+				error "--check-config cannot be used with a client command"
+			end
 			options.check_config = true
+		elseif argument == "--socket" then
+			index = index + 1
+			if not args[index] then
+				error "--socket requires a path"
+			end
+			if options.socket_path then
+				error "control socket path was specified more than once"
+			end
+			options.socket_path = args[index]
+		elseif argument == "--format" then
+			index = index + 1
+			if args[index] ~= "eww" then
+				error "--format currently supports only eww"
+			end
+			options.format = args[index]
 		elseif argument == "--help" then
 			options.help = true
 		elseif argument:sub(1, 1) == "-" then
 			error("unknown option: " .. argument)
+		elseif options.command then
+			error("unexpected argument for " .. options.command .. ": " .. argument)
 		elseif options.config_path then
 			error "configuration path was specified more than once"
 		else
@@ -46,26 +75,46 @@ local function parse_arguments(args)
 		end
 		index = index + 1
 	end
+	if options.format and options.command ~= "subscribe" then
+		error "--format can only be used with subscribe"
+	end
+	if options.socket_path and not options.command then
+		error "--socket can only be used with a client command"
+	end
 	return options
 end
 
 local function build_service_loader()
-	local names = {
+	local service_names = {
 		"logger",
 		"main",
 		"root",
+		"state",
 		"timer",
 	}
 	local lines = {
-		"local sources = {",
+		"local services = {",
 	}
-	for _, name in ipairs(names) do
+	for _, name in ipairs(service_names) do
 		lines[#lines + 1] = ("[%q] = %q,"):format(name, embed.get("service." .. name))
 	end
 	lines[#lines + 1] = "}"
+	lines[#lines + 1] = "local modules = {"
+	for _, name in ipairs {
+		"hypringo.json",
+		"hypringo.state",
+	} do
+		lines[#lines + 1] = ("[%q] = %q,"):format(name, embed.get(name))
+	end
+	lines[#lines + 1] = "}"
 	lines[#lines + 1] = [[
+for module_name, module_source in pairs(modules) do
+	package.preload[module_name] = function()
+		return assert(load(module_source, "=(module:" .. module_name .. ")", "t"))()
+	end
+end
 local name = ...
-local source = sources[name]
+local source = services[name]
 if not source then
 	return nil, "unknown embedded service: " .. tostring(name)
 end
@@ -88,6 +137,14 @@ local function start(config_path, config)
 			{
 				name = "logger",
 				unique = true,
+			},
+			{
+				name = "state",
+				unique = true,
+				args = {
+					config_path,
+					config,
+				},
 			},
 			{
 				name = "main",
@@ -118,9 +175,23 @@ local function start(config_path, config)
 	io.stdout:flush()
 end
 
+local function run_client(options)
+	local control = require "hypringo.control"
+	local socket_path = options.socket_path or config_module.default_socket_path()
+	if socket_path:sub(1, 1) ~= "/" then
+		error "control socket path must be absolute"
+	end
+	control.request(socket_path, options.command)
+end
+
 local options = parse_arguments(...)
 if options.help then
 	usage()
+	return
+end
+
+if options.command then
+	run_client(options)
 	return
 end
 

@@ -1,5 +1,13 @@
 local M = {}
 
+local function default_socket_path()
+	local runtime_dir = os.getenv "XDG_RUNTIME_DIR"
+	if not runtime_dir or runtime_dir == "" then
+		error "cannot resolve control socket path: XDG_RUNTIME_DIR is not set"
+	end
+	return runtime_dir .. "/hypringo.sock"
+end
+
 local function default_path()
 	local config_home = os.getenv "XDG_CONFIG_HOME"
 	if config_home and config_home ~= "" then
@@ -73,8 +81,21 @@ function M.load(path)
 	end
 	config.runtime.workers = workers
 
+	local socket_path = config.runtime.socket_path or default_socket_path()
+	if type(socket_path) ~= "string" or socket_path == "" then
+		error "configuration field runtime.socket_path must be a non-empty string"
+	end
+	if socket_path:sub(1, 1) ~= "/" then
+		error "configuration field runtime.socket_path must be an absolute path"
+	end
+	config.runtime.socket_path = socket_path
+
 	validate_value(config, "configuration", {}, {})
 	return config
+end
+
+function M.default_socket_path()
+	return default_socket_path()
 end
 
 return M

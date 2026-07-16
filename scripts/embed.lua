@@ -7,8 +7,11 @@ local sources = {
 	{ "service.root", "3rd/ltask/service/root.lua" },
 	{ "service.timer", "3rd/ltask/service/timer.lua" },
 	{ "hypringo.config", "src/lualib/config.lua" },
+	{ "hypringo.json", "src/lualib/json.lua" },
 	{ "hypringo.runtime", "src/lualib/runtime.lua" },
+	{ "hypringo.state", "src/lualib/state.lua" },
 	{ "service.main", "src/service/main.lua" },
+	{ "service.state", "src/service/state.lua" },
 }
 
 local function read_all(path)

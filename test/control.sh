@@ -28,9 +28,14 @@ start_daemon() {
 	pid=$!
 	count=0
 	while :; do
-		if [ -S "$socket_path" ] &&
-			XDG_RUNTIME_DIR="$runtime_dir" "$binary" status >/dev/null 2>&1; then
-			break
+		if [ -S "$socket_path" ]; then
+			status=$(
+				XDG_RUNTIME_DIR="$runtime_dir" \
+					"$binary" status 2>/dev/null || true
+			)
+			case "$status" in
+				*'"ready":true'*) break ;;
+			esac
 		fi
 		if ! kill -0 "$pid" 2>/dev/null; then
 			cat "$log_path" >&2
@@ -56,6 +61,15 @@ assert_cloexec() {
 }
 
 start_daemon
+
+doctor=$(XDG_RUNTIME_DIR="$runtime_dir" "$binary" doctor)
+case "$doctor" in
+	*'"healthy":true'*'"config_generation":1'*'"status":"disabled"'*'"type":"doctor"'*) ;;
+	*)
+		echo "unexpected doctor response: $doctor" >&2
+		exit 1
+		;;
+esac
 
 status=$(XDG_RUNTIME_DIR="$runtime_dir" "$binary" status)
 case "$status" in

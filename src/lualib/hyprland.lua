@@ -167,6 +167,9 @@ function M.snapshot(monitors, workspaces, active_window)
 		active_window = normalize_active_window(active_window),
 		active_workspace = active_workspace,
 		available = true,
+		capabilities = {
+			switch_workspace = true,
+		},
 		error = "",
 		monitors = normalized_monitors,
 		workspaces = sorted_array(workspaces, normalize_workspace, compare_workspaces),
@@ -182,6 +185,9 @@ function M.unavailable(message)
 			name = "",
 		},
 		available = false,
+		capabilities = {
+			switch_workspace = true,
+		},
 		error = message or "",
 		monitors = json.array(),
 		workspaces = json.array(),

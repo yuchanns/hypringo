@@ -29,6 +29,7 @@ local embedded_sources = {
 	"3rd/ltask/service/timer.lua",
 	"src/lualib/actions.lua",
 	"src/lualib/config.lua",
+	"src/lualib/doctor.lua",
 	"src/lualib/hyprland.lua",
 	"src/lualib/runtime.lua",
 	"src/lualib/state.lua",

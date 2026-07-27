@@ -208,4 +208,42 @@ function M.default_socket_path()
 	return default_socket_path()
 end
 
+function M.reloadable(current, candidate)
+	local immutable = {
+		{
+			current.runtime.workers,
+			candidate.runtime.workers,
+			"runtime.workers",
+		},
+		{
+			current.runtime.socket_path,
+			candidate.runtime.socket_path,
+			"runtime.socket_path",
+		},
+	}
+	for _, source_name in ipairs { "audio", "hyprland", "mpris" } do
+		immutable[#immutable + 1] = {
+			current.sources[source_name].enabled,
+			candidate.sources[source_name].enabled,
+			("sources.%s.enabled"):format(source_name),
+		}
+	end
+	if current.sources.hyprland.enabled and
+		candidate.sources.hyprland.enabled then
+		for _, field in ipairs { "command_socket", "event_socket" } do
+			immutable[#immutable + 1] = {
+				current.sources.hyprland[field],
+				candidate.sources.hyprland[field],
+				("sources.hyprland.%s"):format(field),
+			}
+		end
+	end
+	for _, entry in ipairs(immutable) do
+		if entry[1] ~= entry[2] then
+			return false, ("restart required after changing %s"):format(entry[3])
+		end
+	end
+	return true
+end
+
 return M

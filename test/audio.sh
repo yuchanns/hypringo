@@ -60,7 +60,8 @@ count=0
 while :; do
 	status=$("$binary" status --socket "$control_socket" 2>/dev/null || true)
 	available=$(printf '%s\n' "$status" | jq -r '.state.audio.available // false' 2>/dev/null || true)
-	if [ "$available" = "true" ]; then
+	ready=$(printf '%s\n' "$status" | jq -r '.state.runtime.ready // false' 2>/dev/null || true)
+	if [ "$available" = "true" ] && [ "$ready" = "true" ]; then
 		break
 	fi
 	if ! kill -0 "$daemon_pid" 2>/dev/null; then
@@ -91,6 +92,14 @@ if [ "$actual_mute" != "$expected_mute" ]; then
 	echo "audio mute mismatch: expected $expected_mute, got $actual_mute" >&2
 	exit 1
 fi
+doctor=$("$binary" doctor --socket "$control_socket")
+printf '%s\n' "$doctor" |
+	jq -e '
+		.healthy == true and
+		.sources.audio.status == "ready" and
+		.sources.audio.capabilities.set_volume == true and
+		.sources.audio.capabilities.set_mute == true
+	' >/dev/null
 
 kill -TERM "$daemon_pid"
 wait "$daemon_pid" 2>/dev/null || true
@@ -126,6 +135,13 @@ printf '%s\n' "$status" |
 		.state.audio.muted == false and
 		.state.audio.sink == "" and
 		.state.audio.volume == 0
+	' >/dev/null
+doctor=$("$binary" doctor --socket "$control_socket")
+printf '%s\n' "$doctor" |
+	jq -e '
+		.healthy == false and
+		.sources.audio.status == "degraded" and
+		.sources.audio.connected == false
 	' >/dev/null
 
 kill -TERM "$daemon_pid"

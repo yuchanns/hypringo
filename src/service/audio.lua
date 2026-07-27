@@ -14,6 +14,11 @@ local stopping = false
 local function unavailable(message)
 	return {
 		available = false,
+		capabilities = {
+			set_mute = true,
+			set_volume = true,
+			toggle_mute = true,
+		},
 		connected = false,
 		error = message or "",
 		muted = false,
@@ -23,6 +28,11 @@ local function unavailable(message)
 end
 
 local function publish(snapshot)
+	snapshot.capabilities = {
+		set_mute = true,
+		set_volume = true,
+		toggle_mute = true,
+	}
 	ltask.send(state_service, "merge", "audio", snapshot)
 end
 
@@ -95,6 +105,14 @@ function S.status()
 		connected = source ~= nil,
 		reconnect_ms = reconnect_ms,
 	}
+end
+
+function S.reload(new_config)
+	source_config = new_config.sources.audio
+	reconnect_ms = math.max(
+		source_config.reconnect_min_ms,
+		math.min(source_config.reconnect_max_ms, reconnect_ms))
+	return true
 end
 
 function S.quit()

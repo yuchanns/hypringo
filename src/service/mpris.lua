@@ -17,6 +17,14 @@ local function unavailable(message)
 		art = "",
 		artist = "",
 		available = false,
+		capabilities = {
+			next = false,
+			pause = false,
+			play = false,
+			play_pause = false,
+			previous = false,
+		},
+		connected = false,
 		error = message or "",
 		player = "",
 		status = "stopped",
@@ -45,7 +53,9 @@ local function connect()
 		return nil
 	end
 	source = opened
-	publish(source:snapshot())
+	local snapshot = source:snapshot()
+	snapshot.connected = true
+	publish(snapshot)
 	reconnect_ms = source_config.reconnect_min_ms
 	ltask.log.info "MPRIS source connected"
 	return true
@@ -74,7 +84,9 @@ ltask.idle_handler(function()
 		wait_message()
 	end
 	if changed then
-		publish(source:snapshot())
+		local snapshot = source:snapshot()
+		snapshot.connected = true
+		publish(snapshot)
 	end
 	if wait_error then
 		disconnect(wait_error)
@@ -97,6 +109,14 @@ function S.status()
 		connected = source ~= nil,
 		reconnect_ms = reconnect_ms,
 	}
+end
+
+function S.reload(new_config)
+	source_config = new_config.sources.mpris
+	reconnect_ms = math.max(
+		source_config.reconnect_min_ms,
+		math.min(source_config.reconnect_max_ms, reconnect_ms))
+	return true
 end
 
 function S.quit()

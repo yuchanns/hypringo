@@ -144,6 +144,9 @@ initial=$(wait_for_status '"available":true')
 assert_contains "$initial" '"monitor":"FAKE-1"' "initial Hyprland snapshot is incomplete"
 assert_contains "$initial" '"monitor_id":7' "initial Hyprland snapshot is incomplete"
 assert_contains "$initial" '"title":"Initial, title"' "initial Hyprland snapshot is incomplete"
+doctor=$("$binary" doctor --socket "$control_socket")
+assert_contains "$doctor" '"healthy":true' "connected Hyprland doctor state was unhealthy"
+assert_contains "$doctor" '"switch_workspace":true' "Hyprland capability was not published"
 eww_initial=$(printf 'status eww\n' | socat - "UNIX-CONNECT:$control_socket")
 assert_contains "$eww_initial" '"title":"Initial, title"' "Eww snapshot is incomplete"
 case "$eww_initial" in
@@ -245,6 +248,9 @@ wait "$event_pid" 2>/dev/null || true
 event_pid=
 exec 3>&-
 wait_for_status '"available":false' >/dev/null
+doctor=$("$binary" doctor --socket "$control_socket")
+assert_contains "$doctor" '"healthy":false' "disconnected Hyprland doctor state was healthy"
+assert_contains "$doctor" '"status":"degraded"' "disconnected Hyprland source was not degraded"
 
 cat >"$fake_dir/monitors.json" <<'JSON'
 [{"id":99,"name":"FAKE-2","description":"Replacement monitor","width":2560,"height":1440,"refreshRate":120,"x":0,"y":0,"scale":1,"transform":0,"focused":true,"dpmsStatus":true,"activeWorkspace":{"id":3,"name":"3"}}]

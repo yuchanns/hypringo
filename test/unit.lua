@@ -1,5 +1,6 @@
 local json = require "hypringo.json"
 local actions = assert(loadfile("src/lualib/actions.lua", "t"))()
+local doctor = assert(loadfile("src/lualib/doctor.lua", "t"))()
 local hyprland = assert(loadfile("src/lualib/hyprland.lua", "t"))()
 local state = assert(loadfile("src/lualib/state.lua", "t"))()
 local config_module = assert(loadfile("src/lualib/config.lua", "t"))()
@@ -106,11 +107,27 @@ assert_equal(all_sources_config.sources.hyprland.enabled, true)
 assert_equal(all_sources_config.sources.mpris.enabled, true)
 ok = pcall(config_module.load, "test/config-too-few-workers.lua")
 assert_equal(ok, false)
+local reload_current = config_module.load "test/config-all-sources.lua"
+local reload_candidate = config_module.load "test/config-all-sources.lua"
+reload_candidate.sources.audio.reconnect_min_ms = 250
+local reloadable, reload_error =
+	config_module.reloadable(reload_current, reload_candidate)
+assert_equal(reloadable, true)
+assert_equal(reload_error, nil)
+reload_candidate.runtime.workers = 5
+reloadable, reload_error =
+	config_module.reloadable(reload_current, reload_candidate)
+assert_equal(reloadable, false)
+assert(reload_error:match "restart required")
+assert(reload_error:match "runtime%.workers")
 
 local snapshot = state.new("example/config.lua", config)
 assert_equal(snapshot.revision, 0)
 assert_equal(snapshot.state.runtime.ready, false)
+assert_equal(snapshot.state.runtime.config_generation, 1)
+assert_equal(snapshot.state.runtime.last_reload_error, "")
 assert_equal(snapshot.state.media.available, false)
+assert_equal(snapshot.state.media.connected, false)
 assert_equal(snapshot.state.hyprland.active_workspace.id, 0)
 assert_equal(snapshot.state.hyprland.available, false)
 assert_equal(#snapshot.state.hyprland.workspaces, 0)
@@ -136,6 +153,33 @@ assert_equal(revision, 1)
 changed, revision = state.merge(snapshot, "runtime", { ready = true })
 assert_equal(changed, false)
 assert_equal(revision, 1)
+
+local healthy_doctor = doctor.build(snapshot, config)
+assert_equal(healthy_doctor.type, "doctor")
+assert_equal(healthy_doctor.healthy, true)
+assert_equal(healthy_doctor.sources.audio.status, "disabled")
+assert_equal(healthy_doctor.sources.hyprland.status, "disabled")
+assert_equal(healthy_doctor.sources.mpris.status, "disabled")
+
+local degraded_snapshot =
+	state.new("test/config-all-sources.lua", all_sources_config)
+state.merge(degraded_snapshot, "runtime", { ready = true })
+local degraded_doctor = doctor.build(degraded_snapshot, all_sources_config)
+assert_equal(degraded_doctor.healthy, false)
+assert_equal(degraded_doctor.sources.audio.status, "degraded")
+assert_equal(degraded_doctor.sources.hyprland.status, "degraded")
+assert_equal(degraded_doctor.sources.mpris.status, "degraded")
+state.merge(degraded_snapshot, "audio", {
+	available = true,
+	connected = true,
+})
+state.merge(degraded_snapshot, "hyprland", { available = true })
+state.merge(degraded_snapshot, "media", { connected = true })
+local ready_doctor = doctor.build(degraded_snapshot, all_sources_config)
+assert_equal(ready_doctor.healthy, true)
+assert_equal(ready_doctor.sources.audio.status, "ready")
+assert_equal(ready_doctor.sources.hyprland.status, "ready")
+assert_equal(ready_doctor.sources.mpris.status, "ready")
 
 changed, revision = state.merge(snapshot, "media", {
 	album = "Album",

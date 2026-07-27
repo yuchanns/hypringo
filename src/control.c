@@ -20,10 +20,16 @@
 #define CONTROL_MAX_ACTIONS 64
 #define CONTROL_COMMAND_SIZE 128
 
+enum control_format {
+	CONTROL_FORMAT_DEFAULT,
+	CONTROL_FORMAT_EWW,
+	CONTROL_FORMAT_DOCTOR,
+};
+
 struct control_client {
 	int fd;
 	bool subscribed;
-	bool eww_format;
+	enum control_format format;
 	char command[CONTROL_COMMAND_SIZE];
 	size_t command_size;
 };
@@ -44,6 +50,8 @@ struct control_server {
 	size_t snapshot_size;
 	char *eww_snapshot;
 	size_t eww_snapshot_size;
+	char *doctor_snapshot;
+	size_t doctor_snapshot_size;
 };
 
 static struct control_server server = {
@@ -97,10 +105,19 @@ write_all(int fd, const char *data, size_t size) {
 }
 
 static char *
-copy_snapshot(bool eww_format, size_t *size) {
+copy_snapshot(enum control_format format, size_t *size) {
 	pthread_mutex_lock(&server.mutex);
-	const char *snapshot = eww_format ? server.eww_snapshot : server.snapshot;
-	*size = eww_format ? server.eww_snapshot_size : server.snapshot_size;
+	const char *snapshot;
+	if (format == CONTROL_FORMAT_EWW) {
+		snapshot = server.eww_snapshot;
+		*size = server.eww_snapshot_size;
+	} else if (format == CONTROL_FORMAT_DOCTOR) {
+		snapshot = server.doctor_snapshot;
+		*size = server.doctor_snapshot_size;
+	} else {
+		snapshot = server.snapshot;
+		*size = server.snapshot_size;
+	}
 	char *result = malloc(*size);
 	if (result != NULL && *size > 0) {
 		memcpy(result, snapshot, *size);
@@ -110,19 +127,28 @@ copy_snapshot(bool eww_format, size_t *size) {
 }
 
 static bool
-send_snapshot(int fd, bool eww_format) {
+send_snapshot(int fd, enum control_format format) {
 	size_t size = 0;
-	char *snapshot = copy_snapshot(eww_format, &size);
+	char *snapshot = copy_snapshot(format, &size);
 	if (snapshot == NULL && size > 0) {
 		return false;
 	}
 	if (size == 0) {
-		if (eww_format) {
+		if (format == CONTROL_FORMAT_EWW) {
 			static const char empty_eww_snapshot[] = "{}\n";
 			return write_all(
 				fd,
 				empty_eww_snapshot,
 				sizeof(empty_eww_snapshot) - 1);
+		}
+		if (format == CONTROL_FORMAT_DOCTOR) {
+			static const char empty_doctor_snapshot[] =
+				"{\"healthy\":false,\"ready\":false,"
+				"\"revision\":0,\"sources\":{},\"type\":\"doctor\"}\n";
+			return write_all(
+				fd,
+				empty_doctor_snapshot,
+				sizeof(empty_doctor_snapshot) - 1);
 		}
 		static const char empty_snapshot[] =
 			"{\"revision\":0,\"state\":{},\"type\":\"snapshot\"}\n";
@@ -144,7 +170,7 @@ static void
 broadcast_snapshot(struct control_client *clients, size_t *count) {
 	for (size_t index = 0; index < *count;) {
 		if (!clients[index].subscribed ||
-			send_snapshot(clients[index].fd, clients[index].eww_format)) {
+			send_snapshot(clients[index].fd, clients[index].format)) {
 			index++;
 		} else {
 			remove_client(clients, count, index);
@@ -177,21 +203,41 @@ handle_command(struct control_client *client, bool *close_client) {
 	}
 	*newline = '\0';
 	bool status = strcmp(client->command, "status") == 0;
+	bool doctor = strcmp(client->command, "doctor") == 0;
 	bool subscribe = strcmp(client->command, "subscribe") == 0;
 	bool eww_status = strcmp(client->command, "status eww") == 0;
 	bool eww_subscribe = strcmp(client->command, "subscribe eww") == 0;
-	if (status || eww_status) {
-		client->eww_format = eww_status;
-		send_snapshot(client->fd, client->eww_format);
+	if (status || eww_status || doctor) {
+		client->format = doctor
+					 ? CONTROL_FORMAT_DOCTOR
+					 : eww_status
+						   ? CONTROL_FORMAT_EWW
+						   : CONTROL_FORMAT_DEFAULT;
+		send_snapshot(client->fd, client->format);
 		*close_client = true;
 		return;
 	}
 	if (subscribe || eww_subscribe) {
-		client->eww_format = eww_subscribe;
+		client->format = eww_subscribe
+					 ? CONTROL_FORMAT_EWW
+					 : CONTROL_FORMAT_DEFAULT;
 		client->subscribed = true;
-		if (!send_snapshot(client->fd, client->eww_format)) {
+		if (!send_snapshot(client->fd, client->format)) {
 			*close_client = true;
 		}
+		return;
+	}
+	if (strcmp(client->command, "reload") == 0) {
+		if (enqueue_action(client->command)) {
+			static const char accepted[] =
+				"{\"type\":\"accepted\"}\n";
+			write_all(client->fd, accepted, sizeof(accepted) - 1);
+		} else {
+			static const char busy[] =
+				"{\"type\":\"error\",\"error\":\"action queue unavailable\"}\n";
+			write_all(client->fd, busy, sizeof(busy) - 1);
+		}
+		*close_client = true;
 		return;
 	}
 	if (strncmp(client->command, "dispatch ", 9) == 0) {
@@ -492,23 +538,31 @@ static int
 lpublish(lua_State *L) {
 	size_t snapshot_size = 0;
 	size_t eww_snapshot_size = 0;
+	size_t doctor_snapshot_size = 0;
 	const char *snapshot = luaL_checklstring(L, 1, &snapshot_size);
 	const char *eww_snapshot = luaL_checklstring(L, 2, &eww_snapshot_size);
+	const char *doctor_snapshot =
+		luaL_checklstring(L, 3, &doctor_snapshot_size);
 	char *snapshot_copy = malloc(snapshot_size);
 	char *eww_snapshot_copy = malloc(eww_snapshot_size);
-	if (snapshot_copy == NULL || eww_snapshot_copy == NULL) {
+	char *doctor_snapshot_copy = malloc(doctor_snapshot_size);
+	if (snapshot_copy == NULL || eww_snapshot_copy == NULL ||
+	    doctor_snapshot_copy == NULL) {
 		free(snapshot_copy);
 		free(eww_snapshot_copy);
+		free(doctor_snapshot_copy);
 		return luaL_error(L, "cannot allocate control snapshot");
 	}
 	memcpy(snapshot_copy, snapshot, snapshot_size);
 	memcpy(eww_snapshot_copy, eww_snapshot, eww_snapshot_size);
+	memcpy(doctor_snapshot_copy, doctor_snapshot, doctor_snapshot_size);
 
 	pthread_mutex_lock(&server.mutex);
 	if (!server.running || server.stopping) {
 		pthread_mutex_unlock(&server.mutex);
 		free(snapshot_copy);
 		free(eww_snapshot_copy);
+		free(doctor_snapshot_copy);
 		return luaL_error(L, "control server is not running");
 	}
 	free(server.snapshot);
@@ -517,6 +571,9 @@ lpublish(lua_State *L) {
 	server.snapshot_size = snapshot_size;
 	server.eww_snapshot = eww_snapshot_copy;
 	server.eww_snapshot_size = eww_snapshot_size;
+	free(server.doctor_snapshot);
+	server.doctor_snapshot = doctor_snapshot_copy;
+	server.doctor_snapshot_size = doctor_snapshot_size;
 	int wake_write = server.wake_write;
 	pthread_mutex_unlock(&server.mutex);
 
@@ -553,6 +610,9 @@ lstop(lua_State *L) {
 	free(server.eww_snapshot);
 	server.eww_snapshot = NULL;
 	server.eww_snapshot_size = 0;
+	free(server.doctor_snapshot);
+	server.doctor_snapshot = NULL;
+	server.doctor_snapshot_size = 0;
 	close_fd(&server.listener);
 	close_fd(&server.wake_read);
 	close_fd(&server.wake_write);
@@ -588,6 +648,8 @@ lrequest(lua_State *L) {
 	const char *path = luaL_checkstring(L, 1);
 	const char *command = luaL_checkstring(L, 2);
 	if (strcmp(command, "status") != 0 &&
+		strcmp(command, "doctor") != 0 &&
+		strcmp(command, "reload") != 0 &&
 		strcmp(command, "subscribe") != 0 &&
 		strcmp(command, "status eww") != 0 &&
 		strcmp(command, "subscribe eww") != 0 &&

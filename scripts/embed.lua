@@ -8,6 +8,7 @@ local sources = {
 	{ "service.timer", "3rd/ltask/service/timer.lua" },
 	{ "hypringo.actions", "src/lualib/actions.lua" },
 	{ "hypringo.config", "src/lualib/config.lua" },
+	{ "hypringo.doctor", "src/lualib/doctor.lua" },
 	{ "hypringo.hyprland", "src/lualib/hyprland.lua" },
 	{ "hypringo.runtime", "src/lualib/runtime.lua" },
 	{ "hypringo.state", "src/lualib/state.lua" },

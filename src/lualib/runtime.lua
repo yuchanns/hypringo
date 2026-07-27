@@ -18,6 +18,8 @@ Options:
   --help              Show this help.
 
 Commands:
+  doctor              Print source health and capabilities.
+  reload              Reload reconnect policy from the active configuration.
   status              Print the current revisioned state and exit.
   subscribe           Stream revisioned state snapshots as JSON lines.
   dispatch            Send a typed workspace, media, or audio action.
@@ -29,7 +31,8 @@ local function parse_arguments(args)
 		action_args = {},
 		check_config = false,
 	}
-	if args[1] == "status" or args[1] == "subscribe" or
+	if args[1] == "doctor" or args[1] == "reload" or
+		args[1] == "status" or args[1] == "subscribe" or
 		args[1] == "dispatch" then
 		options.command = args[1]
 		table.remove(args, 1)
@@ -122,6 +125,8 @@ local function build_service_loader()
 	lines[#lines + 1] = "local modules = {"
 	for _, name in ipairs {
 		"hypringo.actions",
+		"hypringo.config",
+		"hypringo.doctor",
 		"hypringo.hyprland",
 		"hypringo.state",
 	} do

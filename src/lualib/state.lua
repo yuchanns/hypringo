@@ -59,6 +59,11 @@ function M.new(config_path, config)
 		state = {
 			audio = {
 				available = false,
+				capabilities = {
+					set_mute = config.sources.audio.enabled,
+					set_volume = config.sources.audio.enabled,
+					toggle_mute = config.sources.audio.enabled,
+				},
 				connected = false,
 				error = "",
 				muted = false,
@@ -87,6 +92,9 @@ function M.new(config_path, config)
 					name = "",
 				},
 				available = false,
+				capabilities = {
+					switch_workspace = config.sources.hyprland.enabled,
+				},
 				error = "",
 				monitors = json.array(),
 				workspaces = json.array(),
@@ -96,13 +104,23 @@ function M.new(config_path, config)
 				artist = "",
 				art = "",
 				available = false,
+				capabilities = {
+					next = false,
+					pause = false,
+					play = false,
+					play_pause = false,
+					previous = false,
+				},
+				connected = false,
 				error = "",
 				player = "",
 				status = "stopped",
 				title = "",
 			},
 			runtime = {
+				config_generation = 1,
 				config_path = config_path,
+				last_reload_error = "",
 				ready = false,
 				socket_path = config.runtime.socket_path,
 				workers = config.runtime.workers,

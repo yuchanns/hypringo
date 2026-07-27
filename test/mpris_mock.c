@@ -18,9 +18,15 @@ struct player {
 	const char *identity;
 	const char *title;
 	const char *status;
+	int can_control;
+	int can_go_next;
+	int can_go_previous;
+	int can_pause;
+	int can_play;
 };
 
 static volatile sig_atomic_t running = 1;
+static volatile sig_atomic_t capability_requested;
 static volatile sig_atomic_t irrelevant_requested;
 static volatile sig_atomic_t toggle_requested;
 
@@ -30,9 +36,39 @@ handle_signal(int signal_number) {
 		toggle_requested = 1;
 	} else if (signal_number == SIGUSR2) {
 		irrelevant_requested = 1;
+	} else if (signal_number == SIGWINCH) {
+		capability_requested = 1;
 	} else {
 		running = 0;
 	}
+}
+
+static int
+property_bool(sd_bus *bus,
+	      const char *path,
+	      const char *interface,
+	      const char *property,
+	      sd_bus_message *reply,
+	      void *userdata,
+	      sd_bus_error *error) {
+	(void)bus;
+	(void)path;
+	(void)interface;
+	(void)error;
+	struct player *player = userdata;
+	int value;
+	if (strcmp(property, "CanControl") == 0) {
+		value = player->can_control;
+	} else if (strcmp(property, "CanGoNext") == 0) {
+		value = player->can_go_next;
+	} else if (strcmp(property, "CanGoPrevious") == 0) {
+		value = player->can_go_previous;
+	} else if (strcmp(property, "CanPause") == 0) {
+		value = player->can_pause;
+	} else {
+		value = player->can_play;
+	}
+	return sd_bus_message_append(reply, "b", value);
 }
 
 static int
@@ -208,6 +244,36 @@ static const sd_bus_vtable player_vtable[] = {
 		property_volume,
 		0,
 		SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+	SD_BUS_PROPERTY(
+		"CanControl",
+		"b",
+		property_bool,
+		0,
+		SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+	SD_BUS_PROPERTY(
+		"CanGoNext",
+		"b",
+		property_bool,
+		0,
+		SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+	SD_BUS_PROPERTY(
+		"CanGoPrevious",
+		"b",
+		property_bool,
+		0,
+		SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+	SD_BUS_PROPERTY(
+		"CanPause",
+		"b",
+		property_bool,
+		0,
+		SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
+	SD_BUS_PROPERTY(
+		"CanPlay",
+		"b",
+		property_bool,
+		0,
+		SD_BUS_VTABLE_PROPERTY_EMITS_CHANGE),
 	SD_BUS_METHOD("Next", "", "", method_action, 0),
 	SD_BUS_METHOD("Pause", "", "", method_action, 0),
 	SD_BUS_METHOD("Play", "", "", method_action, 0),
@@ -251,6 +317,19 @@ run(const char *name, struct player *player) {
 	}
 
 	while (running) {
+		if (capability_requested) {
+			capability_requested = 0;
+			player->can_go_previous = !player->can_go_previous;
+			result = sd_bus_emit_properties_changed(
+				bus,
+				OBJECT_PATH,
+				PLAYER_INTERFACE,
+				"CanGoPrevious",
+				NULL);
+			if (result < 0) {
+				break;
+			}
+		}
 		if (irrelevant_requested) {
 			irrelevant_requested = 0;
 			result = sd_bus_emit_properties_changed(
@@ -312,6 +391,7 @@ main(int argc, char **argv) {
 	signal(SIGTERM, handle_signal);
 	signal(SIGUSR1, handle_signal);
 	signal(SIGUSR2, handle_signal);
+	signal(SIGWINCH, handle_signal);
 	struct player player = {
 		.action_log = argv[5],
 		.album = "Mock album",
@@ -320,6 +400,11 @@ main(int argc, char **argv) {
 		.identity = argv[2],
 		.status = argv[3],
 		.title = argv[4],
+		.can_control = 1,
+		.can_go_next = 1,
+		.can_go_previous = 0,
+		.can_pause = 1,
+		.can_play = 1,
 	};
 	int result = run(argv[1], &player);
 	if (result < 0) {

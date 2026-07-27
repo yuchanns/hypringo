@@ -24,6 +24,11 @@ struct mpris_source {
 	sd_bus_slot *name_slot;
 	sd_bus_slot *properties_slot;
 	char *selected_name;
+	bool can_go_next;
+	bool can_go_previous;
+	bool can_pause;
+	bool can_play;
+	bool can_control;
 	bool dirty;
 };
 
@@ -35,6 +40,11 @@ struct player_snapshot {
 	char *album;
 	char *artist;
 	char *art;
+	bool can_go_next;
+	bool can_go_previous;
+	bool can_pause;
+	bool can_play;
+	bool can_control;
 };
 
 static int
@@ -70,6 +80,11 @@ close_source(struct mpris_source *source) {
 	source->bus = sd_bus_unref(source->bus);
 	free(source->selected_name);
 	source->selected_name = NULL;
+	source->can_go_next = false;
+	source->can_go_previous = false;
+	source->can_pause = false;
+	source->can_play = false;
+	source->can_control = false;
 	source->dirty = false;
 }
 
@@ -88,6 +103,17 @@ lsource_gc(lua_State *L) {
 static bool
 is_mpris_name(const char *name) {
 	return strncmp(name, MPRIS_BUS_PREFIX, strlen(MPRIS_BUS_PREFIX)) == 0;
+}
+
+static bool
+is_relevant_property(const char *property) {
+	return strcmp(property, "Metadata") == 0 ||
+	       strcmp(property, "PlaybackStatus") == 0 ||
+	       strcmp(property, "CanControl") == 0 ||
+	       strcmp(property, "CanGoNext") == 0 ||
+	       strcmp(property, "CanGoPrevious") == 0 ||
+	       strcmp(property, "CanPause") == 0 ||
+	       strcmp(property, "CanPlay") == 0;
 }
 
 static int
@@ -133,8 +159,7 @@ properties_changed(sd_bus_message *message,
 		if (result < 0) {
 			break;
 		}
-		if (strcmp(property, "Metadata") == 0 ||
-		    strcmp(property, "PlaybackStatus") == 0) {
+		if (is_relevant_property(property)) {
 			relevant = true;
 		}
 		result = sd_bus_message_skip(message, "v");
@@ -155,8 +180,7 @@ properties_changed(sd_bus_message *message,
 		if (result <= 0) {
 			break;
 		}
-		if (strcmp(property, "Metadata") == 0 ||
-		    strcmp(property, "PlaybackStatus") == 0) {
+		if (is_relevant_property(property)) {
 			relevant = true;
 		}
 	}
@@ -195,6 +219,26 @@ read_string_property(sd_bus *bus,
 	}
 	*result = value;
 	return 0;
+}
+
+static void
+read_bool_property(sd_bus *bus,
+		   const char *destination,
+		   const char *property,
+		   bool *value) {
+	sd_bus_error error = SD_BUS_ERROR_NULL;
+	int result = 0;
+	int status = sd_bus_get_property_trivial(
+		bus,
+		destination,
+		MPRIS_OBJECT_PATH,
+		MPRIS_PLAYER_INTERFACE,
+		property,
+		&error,
+		'b',
+		&result);
+	sd_bus_error_free(&error);
+	*value = status >= 0 && result != 0;
 }
 
 static int
@@ -390,6 +434,15 @@ read_player(sd_bus *bus,
 	}
 	result = read_metadata(bus, name, player);
 	(void)result;
+	read_bool_property(bus, name, "CanControl", &player->can_control);
+	read_bool_property(bus, name, "CanGoNext", &player->can_go_next);
+	read_bool_property(
+		bus,
+		name,
+		"CanGoPrevious",
+		&player->can_go_previous);
+	read_bool_property(bus, name, "CanPause", &player->can_pause);
+	read_bool_property(bus, name, "CanPlay", &player->can_play);
 	player->bus_name = strdup(name);
 	if (player->bus_name == NULL) {
 		return -ENOMEM;
@@ -504,18 +557,29 @@ select_player(struct mpris_source *source,
 
 static void
 push_unavailable(lua_State *L, const char *error) {
-	lua_createtable(L, 0, 9);
+	lua_createtable(L, 0, 10);
 	lua_pushboolean(L, false);
 	lua_setfield(L, -2, "available");
 	lua_pushstring(L, error == NULL ? "" : error);
 	lua_setfield(L, -2, "error");
 	for (const char **field = (const char *[]){
-		     "album", "art", "artist", "player", "status", "title", NULL };
+		     "album", "art", "artist", "player", "title", NULL };
 	     *field != NULL;
 	     field++) {
 		lua_pushliteral(L, "");
 		lua_setfield(L, -2, *field);
 	}
+	lua_pushliteral(L, "stopped");
+	lua_setfield(L, -2, "status");
+	lua_createtable(L, 0, 5);
+	for (const char **field = (const char *[]){
+		     "next", "pause", "play", "play_pause", "previous", NULL };
+	     *field != NULL;
+	     field++) {
+		lua_pushboolean(L, false);
+		lua_setfield(L, -2, *field);
+	}
+	lua_setfield(L, -2, "capabilities");
 }
 
 static int
@@ -543,6 +607,11 @@ lsource_snapshot(lua_State *L) {
 	source->selected_name = selected.bus_name == NULL
 				      ? NULL
 				      : strdup(selected.bus_name);
+	source->can_control = selected.can_control;
+	source->can_go_next = selected.can_go_next;
+	source->can_go_previous = selected.can_go_previous;
+	source->can_pause = selected.can_pause;
+	source->can_play = selected.can_play;
 	if (selected.bus_name == NULL) {
 		push_unavailable(L, "");
 		free_player(&selected);
@@ -553,7 +622,7 @@ lsource_snapshot(lua_State *L) {
 		return luaL_error(L, "cannot allocate selected MPRIS player");
 	}
 
-	lua_createtable(L, 0, 9);
+	lua_createtable(L, 0, 10);
 	lua_pushboolean(L, true);
 	lua_setfield(L, -2, "available");
 	lua_pushliteral(L, "");
@@ -573,6 +642,27 @@ lsource_snapshot(lua_State *L) {
 		lua_pushstring(L, fields[index].value);
 		lua_setfield(L, -2, fields[index].field);
 	}
+	lua_createtable(L, 0, 5);
+	struct {
+		const char *field;
+		bool value;
+	} capabilities[] = {
+		{ "next", selected.can_control && selected.can_go_next },
+		{ "pause", selected.can_control && selected.can_pause },
+		{ "play", selected.can_control && selected.can_play },
+		{ "play_pause",
+		  selected.can_control &&
+			  (selected.can_pause || selected.can_play) },
+		{ "previous",
+		  selected.can_control && selected.can_go_previous },
+	};
+	for (size_t index = 0;
+	     index < sizeof(capabilities) / sizeof(capabilities[0]);
+	     index++) {
+		lua_pushboolean(L, capabilities[index].value);
+		lua_setfield(L, -2, capabilities[index].field);
+	}
+	lua_setfield(L, -2, "capabilities");
 	free_player(&selected);
 	return 1;
 }
@@ -711,6 +801,29 @@ action_method(const char *action) {
 	return NULL;
 }
 
+static bool
+action_available(const struct mpris_source *source, const char *action) {
+	if (!source->can_control) {
+		return false;
+	}
+	if (strcmp(action, "next") == 0) {
+		return source->can_go_next;
+	}
+	if (strcmp(action, "pause") == 0) {
+		return source->can_pause;
+	}
+	if (strcmp(action, "play") == 0) {
+		return source->can_play;
+	}
+	if (strcmp(action, "play-pause") == 0) {
+		return source->can_pause || source->can_play;
+	}
+	if (strcmp(action, "previous") == 0) {
+		return source->can_go_previous;
+	}
+	return false;
+}
+
 static int
 lsource_dispatch(lua_State *L) {
 	struct mpris_source *source = check_source(L, 1);
@@ -722,6 +835,14 @@ lsource_dispatch(lua_State *L) {
 	if (source->selected_name == NULL) {
 		lua_pushnil(L);
 		lua_pushliteral(L, "no MPRIS player is available");
+		return 2;
+	}
+	if (!action_available(source, action)) {
+		lua_pushnil(L);
+		lua_pushfstring(
+			L,
+			"MPRIS player does not support action: %s",
+			action);
 		return 2;
 	}
 

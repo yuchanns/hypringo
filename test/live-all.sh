@@ -78,6 +78,17 @@ if [ "$actual_sink" != "$expected_sink" ]; then
 	echo "combined source audio sink mismatch: expected $expected_sink, got $actual_sink" >&2
 	exit 1
 fi
+doctor=$(
+	XDG_RUNTIME_DIR="$runtime_dir" \
+		"$binary" doctor --socket "$control_socket"
+)
+printf '%s\n' "$doctor" |
+	jq -e '
+		.healthy == true and
+		.sources.audio.status == "ready" and
+		.sources.hyprland.status == "ready" and
+		.sources.mpris.status == "ready"
+	' >/dev/null
 
 kill -TERM "$daemon_pid"
 wait "$daemon_pid" 2>/dev/null || true

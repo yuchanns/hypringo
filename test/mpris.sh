@@ -36,7 +36,10 @@ exec dbus-run-session -- sh -eu -c '
 	}
 	trap cleanup EXIT INT TERM
 
-	cat >"$config_path" <<EOF
+	write_config() {
+		reconnect_min_ms=$1
+		reconnect_max_ms=$2
+		cat >"$config_path" <<EOF
 return {
 	runtime = {
 		socket_path = "$control_socket",
@@ -45,12 +48,14 @@ return {
 	sources = {
 		mpris = {
 			enabled = true,
-			reconnect_max_ms = 100,
-			reconnect_min_ms = 20,
+			reconnect_max_ms = $reconnect_max_ms,
+			reconnect_min_ms = $reconnect_min_ms,
 		},
 	},
 }
 EOF
+	}
+	write_config 20 100
 
 	wait_for_status() {
 		pattern=$1
@@ -115,6 +120,27 @@ EOF
 	assert_contains "$initial" "\"status\":\"paused\"" "MPRIS status was not normalized"
 	assert_contains "$initial" "\"title\":\"Alpha title\"" "MPRIS metadata was not published"
 	assert_contains "$initial" "\"album\":\"Mock album\"" "MPRIS album was not published"
+	assert_contains "$initial" "\"connected\":true" "MPRIS bus health was not published"
+	assert_contains "$initial" "\"next\":true" "supported MPRIS capability was not published"
+	assert_contains "$initial" "\"previous\":false" "unsupported MPRIS capability was not published"
+	doctor=$("$binary" doctor --socket "$control_socket")
+	assert_contains "$doctor" "\"healthy\":true" "connected MPRIS doctor state was unhealthy"
+	assert_contains "$doctor" "\"status\":\"ready\"" "MPRIS doctor state was not ready"
+	write_config 30 80
+	"$binary" reload --socket "$control_socket" >/dev/null
+	count=0
+	while :; do
+		doctor=$("$binary" doctor --socket "$control_socket")
+		case "$doctor" in
+			*"\"config_generation\":2"*) break ;;
+		esac
+		count=$((count + 1))
+		if [ "$count" -ge 100 ]; then
+			echo "MPRIS source did not apply reconnect policy reload" >&2
+			exit 1
+		fi
+		sleep 0.01
+	done
 	sleep 0.05
 	initial=$("$binary" status --socket "$control_socket")
 	initial_revision=$(printf "%s\n" "$initial" | jq -r .revision)
@@ -126,6 +152,30 @@ EOF
 		echo "irrelevant MPRIS property changed the state revision" >&2
 		exit 1
 	fi
+
+	"$binary" dispatch media previous --socket "$control_socket" >/dev/null
+	sleep 0.05
+	if grep -Fxq Previous "$alpha_log" 2>/dev/null; then
+		echo "unsupported MPRIS action reached the selected player" >&2
+		exit 1
+	fi
+	kill -WINCH "$alpha_pid"
+	capable=$(wait_for_status "\"previous\":true")
+	assert_contains "$capable" "\"player\":\"Alpha\"" "capability update changed the selected player"
+	"$binary" dispatch media previous --socket "$control_socket" >/dev/null
+	count=0
+	while ! grep -Fxq Previous "$alpha_log" 2>/dev/null; do
+		if ! kill -0 "$daemon_pid" 2>/dev/null; then
+			cat "$daemon_log" >&2
+			exit 1
+		fi
+		count=$((count + 1))
+		if [ "$count" -ge 100 ]; then
+			echo "newly supported MPRIS action did not reach the player" >&2
+			exit 1
+		fi
+		sleep 0.01
+	done
 
 	kill -USR1 "$zeta_pid"
 	playing=$(wait_for_status "\"player\":\"Zeta\"")
@@ -160,6 +210,9 @@ EOF
 	unavailable=$(wait_for_status "\"available\":false")
 	assert_contains "$unavailable" "\"player\":\"\"" "MPRIS removal did not reset player"
 	assert_contains "$unavailable" "\"title\":\"\"" "MPRIS removal did not reset metadata"
+	assert_contains "$unavailable" "\"connected\":true" "empty MPRIS bus was marked disconnected"
+	doctor=$("$binary" doctor --socket "$control_socket")
+	assert_contains "$doctor" "\"healthy\":true" "empty but connected MPRIS source was unhealthy"
 
 	kill -TERM "$daemon_pid"
 	wait "$daemon_pid" 2>/dev/null || true

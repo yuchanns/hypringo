@@ -155,6 +155,14 @@ function S.status()
 	}
 end
 
+function S.reload(new_config)
+	source_config = new_config.sources.hyprland
+	reconnect_ms = math.max(
+		source_config.reconnect_min_ms,
+		math.min(source_config.reconnect_max_ms, reconnect_ms))
+	return true
+end
+
 function S.quit()
 	stopping = true
 	if event_stream then

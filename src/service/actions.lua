@@ -3,6 +3,7 @@ local control = require "hypringo.control"
 local ltask = require "ltask"
 
 local config = ...
+local state_service = ltask.queryservice "state"
 local stopping = false
 
 local function call_service(service_name, action)
@@ -21,6 +22,18 @@ local function call_service(service_name, action)
 end
 
 local function dispatch(command)
+	if command == "reload" then
+		local ok, reloaded, reload_error =
+			pcall(ltask.call, state_service, "reload")
+		if not ok then
+			ltask.log.error("configuration reload failed", reloaded)
+		elseif not reloaded then
+			ltask.log.error(
+				"configuration reload failed",
+				reload_error or "unknown error")
+		end
+		return
+	end
 	local action, parse_error = actions.parse(command)
 	if not action then
 		ltask.log.error("rejected invalid dispatch command", parse_error)

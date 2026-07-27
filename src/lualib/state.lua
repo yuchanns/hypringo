@@ -8,7 +8,18 @@ local domains = {
 	hyprland = true,
 	media = true,
 	runtime = true,
+	system = true,
 	weather = true,
+}
+
+local array_fields = {
+	github = {
+		notifications = true,
+	},
+	hyprland = {
+		monitors = true,
+		workspaces = true,
+	},
 }
 
 local function copy(value, visiting)
@@ -137,6 +148,24 @@ function M.new(config_path, config)
 				socket_path = config.runtime.socket_path,
 				workers = config.runtime.workers,
 			},
+			system = {
+				available = false,
+				battery = {
+					available = false,
+					capacity = 0,
+					device = "",
+					status = "",
+				},
+				brightness = {
+					available = false,
+					capabilities = {
+						set = false,
+					},
+					device = "",
+					percent = 0,
+				},
+				error = "",
+			},
 			weather = {
 				available = false,
 				condition = "",
@@ -167,6 +196,10 @@ function M.merge(snapshot, domain, patch)
 	local target = snapshot.state[domain]
 	local changed = false
 	for key, value in pairs(patch) do
+		if array_fields[domain] and array_fields[domain][key] and
+			type(value) == "table" and next(value) == nil then
+			value = json.array()
+		end
 		if not equal(target[key], value, {}) then
 			target[key] = copy(value, {})
 			changed = true

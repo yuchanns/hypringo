@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+if [ -z "${HYPRINGO_GITHUB_TOKEN:-}" ]; then
+	if ! command -v gh >/dev/null 2>&1; then
+		echo "hypringo: gh is required when HYPRINGO_GITHUB_TOKEN is unset" >&2
+		exit 1
+	fi
+	HYPRINGO_GITHUB_TOKEN=$(gh auth token)
+	export HYPRINGO_GITHUB_TOKEN
+fi
+
+exec "${HYPRINGO_BIN:-"$HOME/.local/bin/hypringo"}" "$@"

@@ -32,10 +32,31 @@ test -S "$hyprland_dir/.socket2.sock"
 test -S "$session_runtime_dir/bus"
 test -S "$session_runtime_dir/pulse/native"
 
-legacy_pid=$(pgrep -f '^/usr/bin/lua ./main.lua$' || true)
-legacy_workspaces=$(eww get workspaces 2>/dev/null || true)
+if pgrep -f '^/usr/bin/lua ./main.lua$' >/dev/null 2>&1 ||
+	pgrep -f '(^|/)hypringo\.sh($| )' >/dev/null 2>&1; then
+	echo "live test requires the legacy runtime to be stopped" >&2
+	exit 1
+fi
+live_pid=$(
+	systemctl --user show hypringo.service \
+		--property MainPID \
+		--value 2>/dev/null || true
+)
+case "$live_pid" in
+	"" | 0 | *[!0-9]*)
+		echo "live test requires an active hypringo.service" >&2
+		exit 1
+		;;
+esac
+kill -0 "$live_pid"
+live_state=$(eww get hypringo 2>/dev/null || true)
+printf '%s\n' "$live_state" |
+	jq -e '.runtime.ready == true' >/dev/null
+live_workspace=$(
+	printf '%s\n' "$live_state" |
+		jq -r '.hyprland.active_workspace.id'
+)
 expected_sink=$(pactl get-default-sink)
-printf '%s\n' "$legacy_workspaces" | jq -e 'length > 0' >/dev/null
 
 DBUS_SESSION_BUS_ADDRESS="unix:path=$session_runtime_dir/bus" \
 	HYPRINGO_TEST_HYPRLAND_DIR="$hyprland_dir" \
@@ -94,14 +115,29 @@ kill -TERM "$daemon_pid"
 wait "$daemon_pid" 2>/dev/null || true
 daemon_pid=
 
-current_legacy_pid=$(pgrep -f '^/usr/bin/lua ./main.lua$' || true)
-current_workspaces=$(eww get workspaces 2>/dev/null || true)
-if [ "$current_legacy_pid" != "$legacy_pid" ]; then
-	echo "combined source test changed the legacy Hypringo process" >&2
+current_live_pid=$(
+	systemctl --user show hypringo.service \
+		--property MainPID \
+		--value 2>/dev/null || true
+)
+current_live_state=$(eww get hypringo 2>/dev/null || true)
+current_live_workspace=$(
+	printf '%s\n' "$current_live_state" |
+		jq -r '.hyprland.active_workspace.id'
+)
+if [ "$current_live_pid" != "$live_pid" ]; then
+	echo "combined source test restarted the live Hypringo service" >&2
 	exit 1
 fi
-if [ "$current_workspaces" != "$legacy_workspaces" ]; then
-	echo "combined source test changed the legacy Eww workspace state" >&2
+if [ "$current_live_workspace" != "$live_workspace" ]; then
+	echo "combined source test changed the live Eww workspace state" >&2
+	exit 1
+fi
+printf '%s\n' "$current_live_state" |
+	jq -e '.runtime.ready == true' >/dev/null
+if pgrep -f '^/usr/bin/lua ./main.lua$' >/dev/null 2>&1 ||
+	pgrep -f '(^|/)hypringo\.sh($| )' >/dev/null 2>&1; then
+	echo "combined source test started the legacy runtime" >&2
 	exit 1
 fi
 

@@ -60,6 +60,18 @@ assert_equal(type(action_error), "string")
 action, action_error = actions.parse "dispatch workspace switch 8;shutdown"
 assert_equal(action, nil)
 assert_equal(type(action_error), "string")
+action_command, action_error =
+	actions.from_cli { "brightness", "set", "75" }
+assert_equal(action_error, nil)
+assert_equal(action_command, "dispatch brightness set 75")
+action = assert(actions.parse(action_command))
+assert_equal(action.domain, "brightness")
+assert_equal(action.name, "set-brightness")
+assert_equal(action.value, 75)
+action_command, action_error =
+	actions.from_cli { "brightness", "set", "101" }
+assert_equal(action_command, nil)
+assert_equal(type(action_error), "string")
 
 local decoded = json.decode '{"items":[1,null,\"\\ud83d\\ude80\"],\"ready\":true}'
 assert_equal(decoded.ready, true)
@@ -96,6 +108,9 @@ assert_equal(config.sources.audio.enabled, false)
 assert_equal(config.sources.hyprland.enabled, false)
 assert_equal(config.sources.mpris.enabled, false)
 assert_equal(config.sources.github.enabled, false)
+assert_equal(config.sources.system.enabled, true)
+assert_equal(config.sources.system.interval_ms, 5000)
+assert_equal(config.sources.system.sysfs_root, "/sys")
 assert_equal(config.sources.weather.enabled, false)
 
 local hyprland_config = config_module.load "test/config-hyprland.lua"
@@ -146,6 +161,18 @@ reloadable, reload_error =
 	config_module.reloadable(reload_current, reload_candidate)
 assert_equal(reloadable, false)
 assert(reload_error:match "sources%.weather%.enabled")
+reload_current = config_module.load "example/config.lua"
+reload_candidate = config_module.load "example/config.lua"
+reload_candidate.sources.system.interval_ms = 10000
+reloadable, reload_error =
+	config_module.reloadable(reload_current, reload_candidate)
+assert_equal(reloadable, true)
+assert_equal(reload_error, nil)
+reload_candidate.sources.system.sysfs_root = "/tmp/test-sysfs"
+reloadable, reload_error =
+	config_module.reloadable(reload_current, reload_candidate)
+assert_equal(reloadable, false)
+assert(reload_error:match "sources%.system%.sysfs_root")
 
 local snapshot = state.new("example/config.lua", config)
 assert_equal(snapshot.revision, 0)
@@ -154,6 +181,9 @@ assert_equal(snapshot.state.runtime.config_generation, 1)
 assert_equal(snapshot.state.runtime.last_reload_error, "")
 assert_equal(snapshot.state.media.available, false)
 assert_equal(snapshot.state.media.connected, false)
+assert_equal(snapshot.state.system.available, false)
+assert_equal(snapshot.state.system.battery.available, false)
+assert_equal(snapshot.state.system.brightness.available, false)
 assert_equal(snapshot.state.hyprland.active_workspace.id, 0)
 assert_equal(snapshot.state.hyprland.available, false)
 assert_equal(#snapshot.state.hyprland.workspaces, 0)
@@ -163,14 +193,19 @@ assert_equal(json.encode(snapshot.state.hyprland.workspaces), "[]")
 local shape_snapshot = state.new("example/config.lua", config)
 local shape_changed, shape_revision =
 	state.merge(shape_snapshot, "hyprland", { workspaces = {} })
-assert_equal(shape_changed, true)
-assert_equal(shape_revision, 1)
-assert_equal(json.encode(shape_snapshot.state.hyprland.workspaces), "{}")
+assert_equal(shape_changed, false)
+assert_equal(shape_revision, 0)
+assert_equal(json.encode(shape_snapshot.state.hyprland.workspaces), "[]")
 shape_changed, shape_revision =
 	state.merge(shape_snapshot, "hyprland", { workspaces = json.array() })
-assert_equal(shape_changed, true)
-assert_equal(shape_revision, 2)
+assert_equal(shape_changed, false)
+assert_equal(shape_revision, 0)
 assert_equal(json.encode(shape_snapshot.state.hyprland.workspaces), "[]")
+shape_changed, shape_revision =
+	state.merge(shape_snapshot, "github", { notifications = {} })
+assert_equal(shape_changed, false)
+assert_equal(shape_revision, 0)
+assert_equal(json.encode(shape_snapshot.state.github.notifications), "[]")
 
 local changed, revision = state.merge(snapshot, "runtime", { ready = true })
 assert_equal(changed, true)
@@ -180,13 +215,16 @@ changed, revision = state.merge(snapshot, "runtime", { ready = true })
 assert_equal(changed, false)
 assert_equal(revision, 1)
 
-local healthy_doctor = doctor.build(snapshot, config)
+local healthy_snapshot = state.copy(snapshot)
+state.merge(healthy_snapshot, "system", { available = true })
+local healthy_doctor = doctor.build(healthy_snapshot, config)
 assert_equal(healthy_doctor.type, "doctor")
 assert_equal(healthy_doctor.healthy, true)
 assert_equal(healthy_doctor.sources.audio.status, "disabled")
 assert_equal(healthy_doctor.sources.github.status, "disabled")
 assert_equal(healthy_doctor.sources.hyprland.status, "disabled")
 assert_equal(healthy_doctor.sources.mpris.status, "disabled")
+assert_equal(healthy_doctor.sources.system.status, "ready")
 assert_equal(healthy_doctor.sources.weather.status, "disabled")
 
 local degraded_snapshot =
@@ -203,11 +241,13 @@ state.merge(degraded_snapshot, "audio", {
 })
 state.merge(degraded_snapshot, "hyprland", { available = true })
 state.merge(degraded_snapshot, "media", { connected = true })
+state.merge(degraded_snapshot, "system", { available = true })
 local ready_doctor = doctor.build(degraded_snapshot, all_sources_config)
 assert_equal(ready_doctor.healthy, true)
 assert_equal(ready_doctor.sources.audio.status, "ready")
 assert_equal(ready_doctor.sources.hyprland.status, "ready")
 assert_equal(ready_doctor.sources.mpris.status, "ready")
+assert_equal(ready_doctor.sources.system.status, "ready")
 
 assert_equal(remote.exponential_delay(1, 100, 800), 100)
 assert_equal(remote.exponential_delay(3, 100, 800), 400)

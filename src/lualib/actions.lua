@@ -49,6 +49,14 @@ function M.from_cli(arguments)
 		#arguments == 2 then
 		return "dispatch audio toggle-mute"
 	end
+	if arguments[1] == "brightness" and arguments[2] == "set" and
+		#arguments == 3 then
+		local percentage = parse_integer(arguments[3])
+		if not percentage or percentage < 0 or percentage > 100 then
+			return nil, "brightness set requires an integer from 0 to 100"
+		end
+		return ("dispatch brightness set %d"):format(percentage)
+	end
 	return nil, "unsupported dispatch action"
 end
 
@@ -100,6 +108,18 @@ function M.parse(command)
 			domain = "audio",
 			name = "toggle-mute",
 		}
+	end
+
+	local brightness = command:match "^dispatch brightness set (%d+)$"
+	if brightness then
+		brightness = assert(parse_integer(brightness))
+		if brightness >= 0 and brightness <= 100 then
+			return {
+				domain = "brightness",
+				name = "set-brightness",
+				value = brightness,
+			}
+		end
 	end
 
 	return nil, "unsupported dispatch action"

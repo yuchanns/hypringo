@@ -63,6 +63,14 @@ local function dispatch(command)
 		call_service("audio", action)
 		return
 	end
+	if action.domain == "brightness" then
+		if not config.sources.system.enabled then
+			ltask.log.error "brightness dispatch requires the system source"
+			return
+		end
+		call_service("system", action)
+		return
+	end
 	ltask.log.error("dispatch source is not enabled", action.domain)
 end
 

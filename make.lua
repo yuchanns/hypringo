@@ -41,6 +41,7 @@ local embedded_sources = {
 	"src/service/actions.lua",
 	"src/service/main.lua",
 	"src/service/state.lua",
+	"src/service/system.lua",
 	"src/service/weather.lua",
 }
 

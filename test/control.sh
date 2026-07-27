@@ -33,9 +33,13 @@ start_daemon() {
 				XDG_RUNTIME_DIR="$runtime_dir" \
 					"$binary" status 2>/dev/null || true
 			)
-			case "$status" in
-				*'"ready":true'*) break ;;
-			esac
+			if printf '%s\n' "$status" |
+				jq -e '
+					.state.runtime.ready == true and
+					.state.system.available == true
+				' >/dev/null 2>&1; then
+				break
+			fi
 		fi
 		if ! kill -0 "$pid" 2>/dev/null; then
 			cat "$log_path" >&2
@@ -72,13 +76,15 @@ case "$doctor" in
 esac
 
 status=$(XDG_RUNTIME_DIR="$runtime_dir" "$binary" status)
-case "$status" in
-	*'"revision":1'*'"monitors":[]'*'"workspaces":[]'*'"ready":true'*'"type":"snapshot"'*) ;;
-	*)
-		echo "unexpected status response: $status" >&2
-		exit 1
-		;;
-esac
+printf '%s\n' "$status" |
+	jq -e '
+		.revision >= 2 and
+		.state.hyprland.monitors == [] and
+		.state.hyprland.workspaces == [] and
+		.state.runtime.ready == true and
+		.state.system.available == true and
+		.type == "snapshot"
+	' >/dev/null
 
 listener_inode=$(
 	awk -v path="$socket_path" '$NF == path { print $(NF - 1); exit }' /proc/net/unix
@@ -130,7 +136,7 @@ while [ -z "$accepted_fd" ]; do
 done
 assert_cloexec "$accepted_fd" "accepted control client"
 count=0
-while ! grep -q '"revision":1' "$subscribe_path" 2>/dev/null; do
+while ! grep -q '"revision":' "$subscribe_path" 2>/dev/null; do
 	if ! kill -0 "$subscriber_pid" 2>/dev/null; then
 		echo "control subscriber exited before receiving a snapshot" >&2
 		exit 1
@@ -154,7 +160,7 @@ if [ "$eww_subscribe_status" -ne 124 ]; then
 	echo "subscribe exited with unexpected status $eww_subscribe_status" >&2
 	exit 1
 fi
-grep -q '"revision":1' "$subscribe_path"
+grep -q '"revision":' "$subscribe_path"
 grep -q '"ready":true' "$eww_subscribe_path"
 if grep -q '"type":"snapshot"' "$eww_subscribe_path"; then
 	echo "Eww subscription unexpectedly contains the control envelope" >&2

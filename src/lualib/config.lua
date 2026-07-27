@@ -258,6 +258,22 @@ function M.load(path)
 		error "configuration field sources.audio.reconnect_max_ms must not be less than reconnect_min_ms"
 	end
 
+	local system = require_table(sources, "system", "sources.system")
+	if system.enabled == nil then
+		system.enabled = true
+	elseif type(system.enabled) ~= "boolean" then
+		error "configuration field sources.system.enabled must be a boolean"
+	end
+	system.interval_ms = validate_integer(
+		system.interval_ms,
+		"sources.system.interval_ms",
+		5000,
+		100,
+		60000)
+	system.sysfs_root = validate_absolute_path(
+		system.sysfs_root or "/sys",
+		"sources.system.sysfs_root")
+
 	local weather = require_table(sources, "weather", "sources.weather")
 	validate_remote_source(weather, "sources.weather", {
 		interval_ms = 600000,
@@ -327,6 +343,7 @@ function M.reloadable(current, candidate)
 		"github",
 		"hyprland",
 		"mpris",
+		"system",
 		"weather",
 	} do
 		immutable[#immutable + 1] = {
@@ -344,6 +361,13 @@ function M.reloadable(current, candidate)
 				("sources.hyprland.%s"):format(field),
 			}
 		end
+	end
+	if current.sources.system.enabled and candidate.sources.system.enabled then
+		immutable[#immutable + 1] = {
+			current.sources.system.sysfs_root,
+			candidate.sources.system.sysfs_root,
+			"sources.system.sysfs_root",
+		}
 	end
 	for _, entry in ipairs(immutable) do
 		if entry[1] ~= entry[2] then

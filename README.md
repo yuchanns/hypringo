@@ -10,33 +10,40 @@ Better Utilize Hyprland in Your Asahi Linux.
 
 </div>
 
-## 当前状态
+## Current status
 
-当前分支提供 Hypringo 的事件驱动运行时：单个原生可执行文件内嵌 Lua
-5.5、ltask、yyjson 与内部 Lua service，外部 `config.lua` 作为唯一用户入口。
-进程内包含单写者状态服务、本地 Unix control socket，以及可独立启用的
-Hyprland、MPRIS、PipeWire-Pulse、weather 和 GitHub source。workspace、媒体和音频操作统一经过
-校验后的 typed dispatch，不向 source 透传任意命令。`doctor` 提供统一的
-source 健康与 capability 视图；配置 reload 只热更新 source 自身 policy，不会在
-运行中悄悄改变 service topology。
+This branch provides an event-driven Hypringo runtime. A single native
+executable embeds Lua 5.5, ltask, yyjson, and internal Lua services, while an
+external `config.lua` remains the only user-facing configuration entry point.
+The process contains a single-writer state service, a local Unix control
+socket, and independently configurable Hyprland, MPRIS, PipeWire-Pulse,
+system-device, weather, and GitHub sources. Workspace, media, audio, and
+brightness operations all pass through validated typed dispatch; arbitrary
+commands are never forwarded to a source. `doctor` provides a unified view of
+source health and capabilities, while configuration reload only hot-applies
+source policies and never changes the service topology implicitly.
 
-## 构建
+## Build
 
-需要较新的 [luamake](https://github.com/actboy168/luamake)、systemd、libcurl
-和 PulseAudio 客户端开发库。音频 source 通过 PipeWire 的 PulseAudio 兼容服务工作，
-不要求链接 PipeWire 私有 ABI。首次检出后初始化三个源码 submodule，再构建
-release 版本：
+A recent [luamake](https://github.com/actboy168/luamake), systemd, libcurl,
+and the PulseAudio client development libraries are required. The audio source
+uses the PulseAudio compatibility service provided by PipeWire and does not
+link against a private PipeWire ABI. Initialize the three source submodules
+after the first checkout, then build the release binary:
 
 ```bash
 git submodule update --init --recursive
 luamake -mode release
 ```
 
-产物位于 `build/bin/hypringo`。
+The resulting binary is `build/bin/hypringo`.
 
-## 配置与运行
+## Configure and run
 
-默认配置路径遵循 XDG：`$XDG_CONFIG_HOME/hypringo/config.lua`；未设置 `XDG_CONFIG_HOME` 时使用 `~/.config/hypringo/config.lua`。也可以直接传入配置文件，或用 `--config` 指定：
+The default configuration path follows XDG:
+`$XDG_CONFIG_HOME/hypringo/config.lua`, or
+`~/.config/hypringo/config.lua` when `XDG_CONFIG_HOME` is unset. A
+configuration file can also be passed directly or selected with `--config`:
 
 ```bash
 mkdir -p ~/.config/hypringo
@@ -47,7 +54,9 @@ build/bin/hypringo main.lua
 build/bin/hypringo --config /path/to/config.lua
 ```
 
-配置文件必须返回可序列化的 Lua table。运行时当前消费 `runtime.workers`，control socket 默认位于 `$XDG_RUNTIME_DIR/hypringo.sock`，也可以显式覆盖：
+The configuration file must return a serializable Lua table. The runtime
+currently consumes `runtime.workers`. The control socket defaults to
+`$XDG_RUNTIME_DIR/hypringo.sock` and can be overridden explicitly:
 
 ```lua
 return {
@@ -65,6 +74,10 @@ return {
 		mpris = {
 			enabled = true,
 		},
+		system = {
+			enabled = true,
+			interval_ms = 5000,
+		},
 		github = {
 			enabled = false,
 		},
@@ -75,15 +88,21 @@ return {
 }
 ```
 
-`socket_path` 必须是绝对路径；通常不需要配置，保留 XDG 默认值即可。每个启用的
-source 都有一个阻塞式 waiter 或有界 HTTP 请求，因此 `runtime.workers` 必须大于
-启用的 source 数量；五个 source 全部启用时使用至少 6 个 worker。
+`socket_path` must be absolute. In most installations it should be omitted so
+the XDG default is used. Every enabled Hyprland, MPRIS, audio, weather, and
+GitHub source owns one blocking waiter or bounded HTTP request, so
+`runtime.workers` must be greater than the number of enabled blocking sources.
+Use at least six workers when all five are enabled. The system-device source
+only uses an ltask timer for short sysfs scans and does not occupy a blocking
+worker.
 
-Hyprland source 默认关闭，启用后会从
+The Hyprland source is disabled by default. When enabled, it reads the initial
+snapshot from
 `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock`
-读取初始 snapshot，并监听 `.socket2.sock`。断线后状态会明确变为
-`available=false`，随后按 100 ms 到 5 s 的指数退避重连；重连成功会重新读取
-monitors、workspaces 和 active window。测试或特殊部署也可以显式指定 socket：
+and listens to `.socket2.sock`. A disconnect explicitly changes the source to
+`available=false`, followed by exponential reconnect backoff from 100 ms to
+5 s. A successful reconnect reloads monitors, workspaces, and the active
+window. Tests and specialized deployments can provide explicit socket paths:
 
 ```lua
 return {
@@ -99,34 +118,57 @@ return {
 }
 ```
 
-无需在配置中预先列出 monitor。Hypringo 在启动、重连和 monitor add/remove
-事件后都会重新读取全部输出；换电脑、扩展屏热插拔和位置变化都由当前
-Hyprland topology 决定。monitor 的稳定身份是 `name`，位置、focused 状态和数字
-`id` 每次重新探测，其中数字 `id` 仅作为观测值保留，不能与 Eww 的显示器位置
-索引混用。UI/backend 应以 snapshot 中的 monitor name 为 key 动态创建、更新和
-移除对应实例；未来的可选配置只用于匹配与覆盖，不作为 monitor 清单。
+Monitors never need to be listed in the configuration. Hypringo refreshes the
+complete output set at startup, after reconnect, and after monitor add/remove
+events. Moving between computers, hot-plugging displays, and changing their
+positions are all governed by the current Hyprland topology. A monitor's
+stable identity is its `name`; position, focused state, and numeric `id` are
+observed again on every refresh. The numeric `id` is informational and must
+not be confused with Eww's positional monitor index. UI and backend consumers
+should key instances by snapshot monitor name and create, update, or remove
+them dynamically. Future optional configuration may provide matching and
+overrides, but never a monitor inventory.
 
-MPRIS source 通过 user D-Bus 的 `NameOwnerChanged` 和
-`PropertiesChanged` 信号发现播放器并更新状态。多个播放器同时存在时，优先选择
-playing，其次 paused，最后按 bus name 排序，因而结果稳定；播放器消失后会选择
-下一个可用实例，全部消失时 `media.available=false` 并清空旧元数据。支持
-`next`、`pause`、`play`、`play-pause` 和 `previous`。所选播放器的
-`CanControl`、`CanGoNext`、`CanGoPrevious`、`CanPause` 和 `CanPlay` 会转成
-动态 capability；不受支持的 action 会在调用 D-Bus method 前被拒绝。
+The MPRIS source discovers players and updates state through the user D-Bus
+`NameOwnerChanged` and `PropertiesChanged` signals. When multiple players are
+available, selection is deterministic: playing first, paused second, then bus
+name. If the selected player disappears, the next available player is chosen;
+when all players disappear, `media.available=false` and stale metadata is
+cleared. Supported actions are `next`, `pause`, `play`, `play-pause`, and
+`previous`. The selected player's `CanControl`, `CanGoNext`, `CanGoPrevious`,
+`CanPause`, and `CanPlay` properties become dynamic capabilities. Unsupported
+actions are rejected before a D-Bus method is called.
 
-audio source 使用 libpulse 订阅 server/sink 事件，并始终跟随当前 default sink。
-这在标准 PipeWire 桌面上连接的是 PipeWire-Pulse 服务，不启动轮询命令或临时子进程。
-默认 sink 或音频服务不可用时会设置 `audio.available=false` 并清空旧值。
+The audio source uses libpulse to subscribe to server and sink events and
+always follows the current default sink. On a standard PipeWire desktop, this
+connects to PipeWire-Pulse without starting polling commands or temporary
+processes. If the default sink or audio service becomes unavailable,
+`audio.available=false` and stale values are cleared.
 
-weather 与 GitHub 是低频远程 source，使用进程内 libcurl，不启动 `curl`、`gh`
-或其他轮询子进程。每个请求都有 connect/total timeout、响应体大小上限和
-HTTP(S)-only redirect 边界；失败按指数退避重试，GitHub 还会遵守
-`Retry-After`、rate-limit reset、`X-Poll-Interval` 与 ETag/304。一个远程 source
-超时不会阻塞另一个 source 或本地事件源。
+The system-device source is enabled by default and scans Linux sysfs directly.
+It does not start `light`, `brightnessctl`, the UPower CLI, or any other
+polling process. Real battery devices are discovered under
+`/sys/class/power_supply`, and backlight devices under
+`/sys/class/backlight`. Missing hardware is a healthy state represented by
+`battery.available=false` or `brightness.available=false`. When devices exist,
+the source publishes their name, capacity and charging status, or brightness
+percentage. The `set_brightness` capability is exposed only when the current
+user can write the backlight `brightness` node. The default five-second rescan
+detects device additions and removals without hard-coding `BAT0`,
+`macsmc-battery`, or a backlight name. Tests can point `sysfs_root` at an
+isolated fixture; production should retain the `/sys` default.
 
-weather endpoint 必须返回一个小型 JSON object，字段为 `cond`、`temp`、`loc`、
-`wind`、`pressure`、`precip` 和 `temp_like`。例如可把 wttr.in 的 format API
-配置为该投影；location 由 URL 决定，不写死在运行时：
+Weather and GitHub are low-frequency remote sources backed by in-process
+libcurl, with no `curl`, `gh`, or other polling subprocess. Every request has
+connect and total timeouts, a response-size limit, and HTTP(S)-only redirect
+boundaries. Failures use exponential backoff. GitHub additionally honors
+`Retry-After`, rate-limit reset, `X-Poll-Interval`, and ETag/304. A timeout in
+one remote source never blocks another source or a local event source.
+
+The weather endpoint must return a small JSON object with `cond`, `temp`,
+`loc`, `wind`, `pressure`, `precip`, and `temp_like` fields. For example,
+wttr.in's format API can project that schema. The URL controls the location;
+the runtime does not hard-code it:
 
 ```lua
 weather = {
@@ -137,10 +179,11 @@ weather = {
 }
 ```
 
-GitHub source 调用 notifications API，只保留最多 `max_items` 个通知的
-id/reason/unread/update time、repository name/URL 和 subject title/type/URL，
-不会把完整 API payload 推给 Eww。token 只从配置指定的环境变量读取，不写入
-snapshot、doctor 或日志：
+The GitHub source calls the notifications API and keeps at most `max_items`
+projected entries: notification ID, reason, unread and update time, repository
+name and URL, and subject title, type, and URL. It never sends the complete API
+payload to Eww. The token is read only from the environment variable named by
+the configuration and never appears in snapshots, `doctor`, or logs:
 
 ```lua
 github = {
@@ -151,12 +194,20 @@ github = {
 }
 ```
 
-systemd 部署时应通过权限为 `0600` 的 user-service `EnvironmentFile` override
-提供该变量；不要把 token 写进 `config.lua` 或 unit 文件。
+For a systemd deployment, provide this variable through a user-service
+`EnvironmentFile` override with mode `0600`. Never put the token in
+`config.lua` or a unit file. If `gh auth login` already stores the token in the
+system keyring, install `contrib/systemd/hypringo-github-start` and point the
+unit override's `ExecStart` to that adapter. It reads the token once at service
+startup and then `exec`s Hypringo; the GitHub source itself still never starts
+a `gh` subprocess.
 
-## 状态与 Eww 数据流
+## State and Eww data flow
 
-运行中的 Hypringo 维护带单调 revision 的规范化状态。`status` 读取一次当前 snapshot，`subscribe` 会先重放当前 snapshot，再持续输出后续 revision；每一行都是完整 JSON，订阅者无需自己修补丢失的增量：
+A running Hypringo instance maintains normalized state with a monotonic
+revision. `status` reads the current snapshot once. `subscribe` first replays
+the current snapshot and then emits later revisions. Every line is complete
+JSON, so subscribers never have to repair a missed delta:
 
 ```bash
 hypringo status
@@ -165,24 +216,27 @@ hypringo subscribe --format eww
 hypringo status --socket /path/to/hypringo.sock
 ```
 
-当前 snapshot 已定义 `runtime`、`hyprland`、`media`、`audio`、`weather` 和
-`github` 六个稳定
-domain。本地事件 source 不可用时会明确输出 `available=false` 并清空失效状态。
-远程 source 首次成功后若刷新失败，会保留最后一份
-可展示数据，同时设置 `stale=true`、`error`、`failures`、`last_success_at` 和
-`refresh_in_ms`；因此 UI 可以明确标记缓存数据，而不是在网络抖动时清空组件。
-control socket 权限固定为 `0600`；第二个 daemon 会拒绝
-抢占仍活跃的 socket，进程异常退出留下的 stale socket 会在下一次启动时安全回收。
+The snapshot defines seven stable domains: `runtime`, `hyprland`, `media`,
+`audio`, `system`, `weather`, and `github`. An unavailable local event source
+explicitly publishes `available=false` and clears stale state. After a remote
+source succeeds once, a later refresh failure preserves the last displayable
+data while setting `stale=true`, `error`, `failures`, `last_success_at`, and
+`refresh_in_ms`. The UI can therefore mark cached data instead of clearing the
+component during a transient network failure. The control socket always uses
+mode `0600`. A second daemon refuses to take over a live socket, while a stale
+socket left by an abnormal exit is recovered safely on the next start.
 
-`doctor` 将配置中的 enabled source 与当前状态合并为 `disabled`、`ready` 或
-`degraded`，并输出整体 `healthy`、`config_generation`、`last_reload_error`
-以及每个 source 的 capability。MPRIS 总线已连接但当前没有播放器时，source
-仍是 `ready`，只是 `available=false`；audio 已连接但没有可用 default sink
-仍是 `degraded`，因为此时音量操作无法完成。
+`doctor` combines the configured enabled sources with current state as
+`disabled`, `ready`, or `degraded`, and reports overall `healthy`,
+`config_generation`, `last_reload_error`, and each source's capabilities. An
+MPRIS bus with no current player remains `ready` but
+`media.available=false`. A connected audio service without an available
+default sink is `degraded`, because volume actions cannot be completed.
 
-普通 `status`/`subscribe` 输出带 `revision/state/type` 的 control envelope；
-`subscribe --format eww` 直接输出完整 state 对象，适合 Eww 的单一长连接
-`deflisten`。示例位于 `contrib/eww/hypringo.yuck`：
+Regular `status` and `subscribe` output uses a control envelope with
+`revision`, `state`, and `type`. `subscribe --format eww` emits the complete
+state object directly and is intended for one long-running Eww `deflisten`.
+See `contrib/eww/hypringo.yuck`:
 
 ```yuck
 (include "./hypringo.yuck")
@@ -190,22 +244,25 @@ control socket 权限固定为 `0600`；第二个 daemon 会拒绝
 (label :text {hypringo.hyprland.active_window.title})
 ```
 
-每次 Eww 重新启动监听都会先收到当前完整 snapshot，不需要恢复 delta，也不需要
-为 workspace、active window 等字段分别运行轮询脚本。为让监听在 daemon
-崩溃或重启后自动重连，安装生命周期适配器：
+Every new Eww listener first receives the complete current snapshot. It never
+has to recover deltas or run separate polling scripts for workspaces, the
+active window, or other fields. Install the lifecycle adapter so the listener
+reconnects automatically after a daemon crash or restart:
 
 ```bash
 install -Dm755 contrib/eww/hypringo-listen \
   ~/.local/bin/hypringo-eww-listen
 ```
 
-`contrib/eww/hypringo.yuck` 默认调用该适配器。它不解析或缓存 JSON；重连成功后
-直接依赖 daemon 的完整 snapshot replay，因此不会把旧 delta 混入新进程状态。
+`contrib/eww/hypringo.yuck` invokes this adapter by default. The adapter does
+not parse or cache JSON. After reconnecting, it relies on the daemon's complete
+snapshot replay and cannot mix stale deltas into a new process state.
 
 ## Typed dispatch
 
-客户端 action 会先被规范化为有限协议，再进入容量为 64 的有界队列；daemon 内部
-再次解析并只路由到对应 source。当前支持：
+Client actions are normalized into a finite protocol before entering a
+bounded queue with capacity 64. The daemon parses them again and routes them
+only to the corresponding source. Supported actions are:
 
 ```bash
 hypringo dispatch workspace switch 3
@@ -214,44 +271,53 @@ hypringo dispatch media next
 hypringo dispatch audio set-volume 60
 hypringo dispatch audio set-mute true
 hypringo dispatch audio toggle-mute
+hypringo dispatch brightness set 60
 ```
 
-workspace ID 必须是整数，volume 只允许 0–100，其他字符串不会被当作 Hyprland、
-D-Bus 或 shell 命令执行。control socket 接收 action 后返回 `accepted`，实际
-source 错误会进入 daemon 日志。
+Workspace IDs must be integers. Volume and brightness values are restricted to
+0 through 100. Other strings are never interpreted as Hyprland commands,
+D-Bus methods, sysfs paths, or shell commands. The control socket returns
+`accepted` after queueing an action; source execution errors are written to the
+daemon log.
 
-## 配置 reload
+## Configuration reload
 
-`reload` 进入同一个有界 control queue，客户端先收到 `accepted`，实际结果通过
-`doctor` 的 generation/error 字段观察：
+`reload` enters the same bounded control queue. The client first receives
+`accepted`; observe the actual result through the generation and error fields
+reported by `doctor`:
 
 ```bash
 hypringo reload
 hypringo doctor
 ```
 
-当前允许热更新本地 source 的 reconnect policy，以及远程 source 的 endpoint、
-timeout/interval/retry/response limit、GitHub token 环境变量名和投影上限。
-`runtime.workers`、control socket、source enabled 状态以及
-Hyprland command/event socket 都决定进程拓扑或已打开资源；修改它们时 reload
-会保留旧配置、保持 generation 不变，并在 `last_reload_error` 中返回
-`restart required`。配置语法或校验失败也不会部分应用；修复文件并再次 reload
-成功后，generation 增加且 error 清空。
+Reload can hot-apply local reconnect and scan policies, remote endpoint,
+timeout, interval, retry and response-limit policies, the GitHub token
+environment-variable name, and projection limits. `runtime.workers`, the
+control socket, source enabled state, Hyprland command and event sockets, and
+the system source's `sysfs_root` determine process topology or access
+boundaries. Changing one of them preserves the old configuration, leaves the
+generation unchanged, and records `restart required` in
+`last_reload_error`. Syntax and validation failures are also never applied
+partially. Fixing the file and reloading successfully increments the
+generation and clears the error.
 
 ## systemd user service
 
-安装二进制和 unit 后，把当前 Hyprland/Wayland 会话环境导入 user manager，再启用服务：
+After installing the binary and unit, import the current Hyprland and Wayland
+session environment into the user manager, then enable the service:
 
 ```bash
 install -Dm755 build/bin/hypringo ~/.local/bin/hypringo
 install -Dm755 contrib/eww/hypringo-listen ~/.local/bin/hypringo-eww-listen
+install -Dm755 contrib/eww/hypringo-cover-listen ~/.local/bin/hypringo-cover-listen
 install -Dm644 contrib/systemd/hypringo.service ~/.config/systemd/user/hypringo.service
 systemctl --user import-environment WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
 systemctl --user daemon-reload
 systemctl --user enable --now hypringo.service
 ```
 
-查看日志与配置错误：
+Inspect logs and configuration errors with:
 
 ```bash
 journalctl --user -u hypringo.service -f
@@ -259,14 +325,17 @@ systemctl --user reload hypringo.service
 hypringo doctor
 ```
 
-unit 在启动前执行 `--check-config`，异常退出使用受限 restart policy，并在 stop
-超时后清理整个进程组；`ExecReload` 只适用于默认 control socket。若配置了自定义
-socket，请在 user unit override 中为 `ExecReload` 同时增加对应 `--socket`。
-unit 绑定到 `graphical-session.target`，不会作为脱离图形会话的后台服务常驻。
+The unit runs `--check-config` before startup, uses a bounded restart policy
+after abnormal exits, and cleans up the complete process group after a stop
+timeout. `ExecReload` assumes the default control socket. If a custom socket
+is configured, add the matching `--socket` argument to `ExecReload` in a user
+unit override. The unit is bound to `graphical-session.target` and does not
+remain running as a background service outside the graphical session.
 
-## 验证
+## Validation
 
-原生 yyjson binding、Lua reducer/config 和 control socket 进程级测试分别运行：
+Run the native yyjson binding, Lua reducer and configuration, and
+process-level control socket tests with:
 
 ```bash
 luamake -mode debug
@@ -279,16 +348,24 @@ sh test/remote.sh build/bin/hypringo
 sh test/hyprland.sh build/bin/hypringo
 sh test/mpris.sh build/bin/hypringo build/bin/mpris_mock
 sh test/audio.sh build/bin/hypringo
+sh test/system.sh build/bin/hypringo
 ```
 
-Hyprland 集成测试只使用临时目录下的模拟 command/event socket，覆盖双屏热插拔、
-焦点迁移、拔屏、事件分包和断线重连；它不连接或修改当前 Hyprland、Eww 和旧版
-Hypringo 进程。MPRIS 测试在私有 D-Bus session 中运行两个 mock player，覆盖稳定
-选择、capability signal、typed action 拒绝/执行和 player removal。reload 测试
-覆盖成功 generation、非法配置与 restart-required 边界；lifecycle 测试从 daemon
-不存在开始监听，执行一次强制崩溃和 stale-socket 恢复，并验证 Eww 收到新进程的
-完整 replay 且 listener 没有遗留子进程。audio 测试只读比较当前 default sink 的
-snapshot，不修改音量或静音状态。
-remote 测试使用本地 HTTP mock，覆盖 timeout、响应体上限、ETag/304、
-`Retry-After`、stale 数据保留、指数退避、字段投影和两个远程 source 的故障隔离；
-不访问真实 weather/GitHub 服务。
+The Hyprland integration test uses only simulated command and event sockets in
+a temporary directory. It covers dual-monitor hot-plug, focus migration,
+unplug, split events, disconnect, and reconnect without connecting to or
+modifying the current Hyprland, Eww, or legacy Hypringo process. The MPRIS test
+runs two mock players in a private D-Bus session and covers deterministic
+selection, capability signals, typed-action rejection and execution, and
+player removal. The reload test covers successful generations, invalid
+configuration, and restart-required boundaries. The lifecycle test begins
+without a daemon, forces one crash and stale-socket recovery, and verifies that
+Eww receives a complete replay from the new process without leaving listener
+children behind. The audio test compares a read-only snapshot of the current
+default sink without changing volume or mute state. The system test uses
+temporary fake sysfs data to cover battery and backlight auto-discovery,
+device priority, typed brightness writes, and hot removal without accessing
+real sysfs. The remote test uses a local HTTP mock to cover timeouts,
+response-size limits, ETag/304, `Retry-After`, stale-data retention,
+exponential backoff, field projection, and fault isolation between the two
+remote sources without contacting real weather or GitHub services.

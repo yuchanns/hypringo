@@ -20,6 +20,7 @@ local sources = {
 	{ "service.mpris", "src/service/mpris.lua" },
 	{ "service.main", "src/service/main.lua" },
 	{ "service.state", "src/service/state.lua" },
+	{ "service.system", "src/service/system.lua" },
 	{ "service.weather", "src/service/weather.lua" },
 }
 

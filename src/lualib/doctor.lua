@@ -5,12 +5,38 @@ local source_domains = {
 	github = "github",
 	hyprland = "hyprland",
 	mpris = "media",
+	system = "system",
 	weather = "weather",
 }
 
 local function source_health(name, config, state)
 	local enabled = config.sources[name].enabled
 	local domain = state[source_domains[name]]
+	if name == "system" then
+		local operational = domain.available and domain.error == ""
+		local status
+		if not enabled then
+			status = "disabled"
+		elseif operational then
+			status = "ready"
+		else
+			status = "degraded"
+		end
+		return {
+			available = enabled and domain.available or false,
+			battery_available =
+				enabled and domain.battery.available or false,
+			brightness_available =
+				enabled and domain.brightness.available or false,
+			capabilities = {
+				set_brightness = enabled and
+					domain.brightness.capabilities.set or false,
+			},
+			enabled = enabled,
+			error = enabled and domain.error or "",
+			status = status,
+		}
+	end
 	if name == "github" or name == "weather" then
 		local operational = domain.available and not domain.stale
 		local status
@@ -63,6 +89,7 @@ function M.build(snapshot, config)
 		"github",
 		"hyprland",
 		"mpris",
+		"system",
 		"weather",
 	} do
 		sources[name] = source_health(name, config, snapshot.state)

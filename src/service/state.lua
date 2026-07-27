@@ -64,6 +64,7 @@ function S.reload()
 		"github",
 		"hyprland",
 		"mpris",
+		"system",
 		"weather",
 	} do
 		if candidate.sources[source_name].enabled then

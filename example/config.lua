@@ -13,6 +13,9 @@ return {
 		mpris = {
 			enabled = false,
 		},
+		system = {
+			enabled = true,
+		},
 		github = {
 			enabled = false,
 		},

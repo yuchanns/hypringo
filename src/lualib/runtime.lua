@@ -22,7 +22,7 @@ Commands:
   reload              Reload reconnect policy from the active configuration.
   status              Print the current revisioned state and exit.
   subscribe           Stream revisioned state snapshots as JSON lines.
-  dispatch            Send a typed workspace, media, or audio action.
+  dispatch            Send a typed workspace, media, audio, or brightness action.
 ]]
 end
 
@@ -114,6 +114,7 @@ local function build_service_loader()
 		"mpris",
 		"root",
 		"state",
+		"system",
 		"timer",
 		"weather",
 	}
@@ -214,6 +215,15 @@ local function start(config_path, config)
 	if config.sources.weather.enabled then
 		bootstrap_services[#bootstrap_services + 1] = {
 			name = "weather",
+			unique = true,
+			args = {
+				config,
+			},
+		}
+	end
+	if config.sources.system.enabled then
+		bootstrap_services[#bootstrap_services + 1] = {
+			name = "system",
 			unique = true,
 			args = {
 				config,

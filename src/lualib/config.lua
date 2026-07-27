@@ -152,6 +152,54 @@ function M.load(path)
 		end
 	end
 
+	local mpris = require_table(sources, "mpris", "sources.mpris")
+	if mpris.enabled == nil then
+		mpris.enabled = false
+	elseif type(mpris.enabled) ~= "boolean" then
+		error "configuration field sources.mpris.enabled must be a boolean"
+	end
+	mpris.reconnect_min_ms = validate_milliseconds(
+		mpris.reconnect_min_ms,
+		"sources.mpris.reconnect_min_ms",
+		100)
+	mpris.reconnect_max_ms = validate_milliseconds(
+		mpris.reconnect_max_ms,
+		"sources.mpris.reconnect_max_ms",
+		5000)
+	if mpris.reconnect_max_ms < mpris.reconnect_min_ms then
+		error "configuration field sources.mpris.reconnect_max_ms must not be less than reconnect_min_ms"
+	end
+
+	local audio = require_table(sources, "audio", "sources.audio")
+	if audio.enabled == nil then
+		audio.enabled = false
+	elseif type(audio.enabled) ~= "boolean" then
+		error "configuration field sources.audio.enabled must be a boolean"
+	end
+	audio.reconnect_min_ms = validate_milliseconds(
+		audio.reconnect_min_ms,
+		"sources.audio.reconnect_min_ms",
+		100)
+	audio.reconnect_max_ms = validate_milliseconds(
+		audio.reconnect_max_ms,
+		"sources.audio.reconnect_max_ms",
+		5000)
+	if audio.reconnect_max_ms < audio.reconnect_min_ms then
+		error "configuration field sources.audio.reconnect_max_ms must not be less than reconnect_min_ms"
+	end
+
+	local blocking_sources = 0
+	for _, source in ipairs { hyprland, mpris, audio } do
+		if source.enabled then
+			blocking_sources = blocking_sources + 1
+		end
+	end
+	if runtime.workers <= blocking_sources then
+		error(
+			("configuration field runtime.workers must be greater than the number of enabled event sources (%d)"):format(
+				blocking_sources))
+	end
+
 	validate_value(config, "configuration", {}, {})
 	return config
 end

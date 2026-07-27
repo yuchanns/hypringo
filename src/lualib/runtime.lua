@@ -6,6 +6,7 @@ local function load_embedded(name, chunkname)
 end
 
 local config_module = load_embedded("hypringo.config", "@src/lualib/config.lua")
+local actions_module = load_embedded("hypringo.actions", "@src/lualib/actions.lua")
 
 local function usage()
 	io.write [[Usage: hypringo [options] [config.lua]
@@ -19,14 +20,17 @@ Options:
 Commands:
   status              Print the current revisioned state and exit.
   subscribe           Stream revisioned state snapshots as JSON lines.
+  dispatch            Send a typed workspace, media, or audio action.
 ]]
 end
 
 local function parse_arguments(args)
 	local options = {
+		action_args = {},
 		check_config = false,
 	}
-	if args[1] == "status" or args[1] == "subscribe" then
+	if args[1] == "status" or args[1] == "subscribe" or
+		args[1] == "dispatch" then
 		options.command = args[1]
 		table.remove(args, 1)
 	end
@@ -64,8 +68,13 @@ local function parse_arguments(args)
 			options.format = args[index]
 		elseif argument == "--help" then
 			options.help = true
+		elseif options.command == "dispatch" and
+			argument:match "^%-?%d+$" then
+			options.action_args[#options.action_args + 1] = argument
 		elseif argument:sub(1, 1) == "-" then
 			error("unknown option: " .. argument)
+		elseif options.command == "dispatch" then
+			options.action_args[#options.action_args + 1] = argument
 		elseif options.command then
 			error("unexpected argument for " .. options.command .. ": " .. argument)
 		elseif options.config_path then
@@ -81,14 +90,24 @@ local function parse_arguments(args)
 	if options.socket_path and not options.command then
 		error "--socket can only be used with a client command"
 	end
+	if options.command == "dispatch" then
+		local command, action_error = actions_module.from_cli(options.action_args)
+		if not command then
+			error(action_error)
+		end
+		options.protocol_command = command
+	end
 	return options
 end
 
 local function build_service_loader()
 	local service_names = {
+		"actions",
+		"audio",
 		"hyprland",
 		"logger",
 		"main",
+		"mpris",
 		"root",
 		"state",
 		"timer",
@@ -102,6 +121,7 @@ local function build_service_loader()
 	lines[#lines + 1] = "}"
 	lines[#lines + 1] = "local modules = {"
 	for _, name in ipairs {
+		"hypringo.actions",
 		"hypringo.hyprland",
 		"hypringo.state",
 	} do
@@ -147,6 +167,15 @@ local function start(config_path, config)
 			},
 		},
 	}
+	if config.sources.audio.enabled then
+		bootstrap_services[#bootstrap_services + 1] = {
+			name = "audio",
+			unique = true,
+			args = {
+				config,
+			},
+		}
+	end
 	if config.sources.hyprland.enabled then
 		bootstrap_services[#bootstrap_services + 1] = {
 			name = "hyprland",
@@ -156,6 +185,22 @@ local function start(config_path, config)
 			},
 		}
 	end
+	if config.sources.mpris.enabled then
+		bootstrap_services[#bootstrap_services + 1] = {
+			name = "mpris",
+			unique = true,
+			args = {
+				config,
+			},
+		}
+	end
+	bootstrap_services[#bootstrap_services + 1] = {
+		name = "actions",
+		unique = true,
+		args = {
+			config,
+		},
+	}
 	bootstrap_services[#bootstrap_services + 1] = {
 		name = "main",
 		args = {
@@ -193,7 +238,7 @@ local function run_client(options)
 	if socket_path:sub(1, 1) ~= "/" then
 		error "control socket path must be absolute"
 	end
-	local command = options.command
+	local command = options.protocol_command or options.command
 	if options.format == "eww" then
 		command = command .. " eww"
 	end

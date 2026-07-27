@@ -1,8 +1,10 @@
 #include "luamods.h"
 
+#include "audio.h"
 #include "control.h"
 #include "ipc.h"
 #include "json.h"
+#include "mpris.h"
 
 #include <lauxlib.h>
 #include <lualib.h>
@@ -18,7 +20,9 @@ preload(lua_State *L, const char *name, lua_CFunction open_function) {
 void
 hypringo_openlibs(lua_State *L) {
 	luaL_openlibs(L);
+	preload(L, "hypringo.audio", luaopen_hypringo_audio);
 	preload(L, "hypringo.control", luaopen_hypringo_control);
 	preload(L, "hypringo.ipc", luaopen_hypringo_ipc);
 	preload(L, "hypringo.json", luaopen_hypringo_json);
+	preload(L, "hypringo.mpris", luaopen_hypringo_mpris);
 }

@@ -2,7 +2,11 @@
 set -eu
 
 request=$(cat)
+printf '%s\n' "$request" >>"$FAKE_HYPRLAND_REQUEST_LOG"
 case "$request" in
+	/dispatch\ workspace\ *)
+		printf 'ok'
+		;;
 	j/activewindow)
 		exec cat "$FAKE_HYPRLAND_DIR/activewindow.json"
 		;;

@@ -131,6 +131,22 @@ end)
 
 local S = {}
 
+function S.dispatch(name, value)
+	if name ~= "switch" or math.type(value) ~= "integer" then
+		return false, "unsupported Hyprland action"
+	end
+	local response, dispatch_error = ipc.request(
+		source_config.command_socket,
+		("/dispatch workspace %d"):format(value))
+	if not response then
+		return false, dispatch_error
+	end
+	if response ~= "" and not response:match "^ok" then
+		return false, response
+	end
+	return true
+end
+
 function S.status()
 	return {
 		connected = event_stream ~= nil,

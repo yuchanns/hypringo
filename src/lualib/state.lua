@@ -59,7 +59,10 @@ function M.new(config_path, config)
 		state = {
 			audio = {
 				available = false,
+				connected = false,
+				error = "",
 				muted = false,
+				sink = "",
 				volume = 0,
 			},
 			hyprland = {
@@ -89,9 +92,11 @@ function M.new(config_path, config)
 				workspaces = json.array(),
 			},
 			media = {
+				album = "",
 				artist = "",
 				art = "",
 				available = false,
+				error = "",
 				player = "",
 				status = "stopped",
 				title = "",

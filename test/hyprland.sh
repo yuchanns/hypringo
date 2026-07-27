@@ -16,6 +16,7 @@ control_socket="$runtime_dir/hypringo.sock"
 config_path="$runtime_dir/config.lua"
 daemon_log="$runtime_dir/hypringo.log"
 command_log="$runtime_dir/command.log"
+command_request_log="$runtime_dir/command-requests.log"
 event_log="$runtime_dir/event.log"
 command_pid=
 event_pid=
@@ -64,7 +65,9 @@ return {
 EOF
 
 start_command_server() {
-	FAKE_HYPRLAND_DIR="$fake_dir" socat \
+	FAKE_HYPRLAND_DIR="$fake_dir" \
+		FAKE_HYPRLAND_REQUEST_LOG="$command_request_log" \
+		socat \
 		"UNIX-LISTEN:$command_socket,unlink-early,fork" \
 		"SYSTEM:sh '$handler'" \
 		>>"$command_log" 2>&1 &
@@ -149,6 +152,41 @@ case "$eww_initial" in
 		exit 1
 		;;
 esac
+
+dispatch_result=$(
+	"$binary" dispatch workspace switch 8 --socket "$control_socket"
+)
+assert_contains "$dispatch_result" '"type":"accepted"' "workspace dispatch was rejected"
+count=0
+while ! grep -Fxq '/dispatch workspace 8' "$command_request_log"; do
+	if ! kill -0 "$daemon_pid" 2>/dev/null; then
+		cat "$daemon_log" >&2
+		exit 1
+	fi
+	count=$((count + 1))
+	if [ "$count" -ge 100 ]; then
+		echo "workspace dispatch did not reach the Hyprland adapter" >&2
+		exit 1
+	fi
+	sleep 0.01
+done
+negative_dispatch=$(
+	"$binary" dispatch workspace switch -3 --socket "$control_socket"
+)
+assert_contains "$negative_dispatch" '"type":"accepted"' "negative workspace dispatch was rejected"
+count=0
+while ! grep -Fxq '/dispatch workspace -3' "$command_request_log"; do
+	if ! kill -0 "$daemon_pid" 2>/dev/null; then
+		cat "$daemon_log" >&2
+		exit 1
+	fi
+	count=$((count + 1))
+	if [ "$count" -ge 100 ]; then
+		echo "negative workspace dispatch did not reach the Hyprland adapter" >&2
+		exit 1
+	fi
+	sleep 0.01
+done
 
 cat >"$fake_dir/activewindow.json" <<'JSON'
 {"address":"0x456","class":"example","title":"Updated, title","workspace":{"id":2,"name":"2"},"floating":false,"fullscreen":0,"pid":43,"xwayland":false}

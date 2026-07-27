@@ -12,11 +12,18 @@ Better Utilize Hyprland in Your Asahi Linux.
 
 ## 当前状态
 
-当前分支提供 Hypringo 的运行时与状态底座：单个原生可执行文件内嵌 Lua 5.5、ltask、yyjson 与内部 Lua service，外部 `config.lua` 作为唯一用户入口。进程内已有单写者状态服务、本地 Unix control socket，以及可选的 Hyprland 事件 source；MPRIS 与 audio source 尚未接入。
+当前分支提供 Hypringo 的事件驱动运行时：单个原生可执行文件内嵌 Lua
+5.5、ltask、yyjson 与内部 Lua service，外部 `config.lua` 作为唯一用户入口。
+进程内包含单写者状态服务、本地 Unix control socket，以及可独立启用的
+Hyprland、MPRIS 和 PipeWire-Pulse source。workspace、媒体和音频操作统一经过
+校验后的 typed dispatch，不向 source 透传任意命令。
 
 ## 构建
 
-需要较新的 [luamake](https://github.com/actboy168/luamake)。首次检出后初始化三个源码 submodule，再构建 release 版本：
+需要较新的 [luamake](https://github.com/actboy168/luamake)、systemd 开发库和
+PulseAudio 客户端开发库。音频 source 通过 PipeWire 的 PulseAudio 兼容服务工作，
+不要求链接 PipeWire 私有 ABI。首次检出后初始化三个源码 submodule，再构建
+release 版本：
 
 ```bash
 git submodule update --init --recursive
@@ -43,18 +50,26 @@ build/bin/hypringo --config /path/to/config.lua
 ```lua
 return {
 	runtime = {
-		workers = 2,
+		workers = 4,
 		socket_path = "/run/user/1000/hypringo.sock",
 	},
 	sources = {
+		audio = {
+			enabled = true,
+		},
 		hyprland = {
+			enabled = true,
+		},
+		mpris = {
 			enabled = true,
 		},
 	},
 }
 ```
 
-`socket_path` 必须是绝对路径；通常不需要配置，保留 XDG 默认值即可。
+`socket_path` 必须是绝对路径；通常不需要配置，保留 XDG 默认值即可。每个启用的
+source 都有一个阻塞式 event waiter，因此 `runtime.workers` 必须大于启用的 source
+数量；全部启用时使用至少 4 个 worker。
 
 Hyprland source 默认关闭，启用后会从
 `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock`
@@ -83,6 +98,16 @@ Hyprland topology 决定。monitor 的稳定身份是 `name`，位置、focused 
 索引混用。UI/backend 应以 snapshot 中的 monitor name 为 key 动态创建、更新和
 移除对应实例；未来的可选配置只用于匹配与覆盖，不作为 monitor 清单。
 
+MPRIS source 通过 user D-Bus 的 `NameOwnerChanged` 和
+`PropertiesChanged` 信号发现播放器并更新状态。多个播放器同时存在时，优先选择
+playing，其次 paused，最后按 bus name 排序，因而结果稳定；播放器消失后会选择
+下一个可用实例，全部消失时 `media.available=false` 并清空旧元数据。支持
+`next`、`pause`、`play`、`play-pause` 和 `previous`。
+
+audio source 使用 libpulse 订阅 server/sink 事件，并始终跟随当前 default sink。
+这在标准 PipeWire 桌面上连接的是 PipeWire-Pulse 服务，不启动轮询命令或临时子进程。
+默认 sink 或音频服务不可用时会设置 `audio.available=false` 并清空旧值。
+
 ## 状态与 Eww 数据流
 
 运行中的 Hypringo 维护带单调 revision 的规范化状态。`status` 读取一次当前 snapshot，`subscribe` 会先重放当前 snapshot，再持续输出后续 revision；每一行都是完整 JSON，订阅者无需自己修补丢失的增量：
@@ -93,7 +118,10 @@ hypringo subscribe --format eww
 hypringo status --socket /path/to/hypringo.sock
 ```
 
-当前 snapshot 已定义 `runtime`、`hyprland`、`media` 和 `audio` 四个稳定 domain。媒体或 Hyprland 不可用时会明确输出 `available=false` 以及清空后的状态，而不是保留上一次成功值。control socket 权限固定为 `0600`；第二个 daemon 会拒绝抢占仍活跃的 socket，进程异常退出留下的 stale socket 会在下一次启动时安全回收。
+当前 snapshot 已定义 `runtime`、`hyprland`、`media` 和 `audio` 四个稳定
+domain。任一 source 不可用时会明确输出 `available=false` 以及清空后的状态，而
+不是保留上一次成功值。control socket 权限固定为 `0600`；第二个 daemon 会拒绝
+抢占仍活跃的 socket，进程异常退出留下的 stale socket 会在下一次启动时安全回收。
 
 普通 `status`/`subscribe` 输出带 `revision/state/type` 的 control envelope；
 `subscribe --format eww` 直接输出完整 state 对象，适合 Eww 的单一长连接
@@ -107,6 +135,24 @@ hypringo status --socket /path/to/hypringo.sock
 
 每次 Eww 重新启动监听都会先收到当前完整 snapshot，不需要恢复 delta，也不需要
 为 workspace、active window 等字段分别运行轮询脚本。
+
+## Typed dispatch
+
+客户端 action 会先被规范化为有限协议，再进入容量为 64 的有界队列；daemon 内部
+再次解析并只路由到对应 source。当前支持：
+
+```bash
+hypringo dispatch workspace switch 3
+hypringo dispatch media play-pause
+hypringo dispatch media next
+hypringo dispatch audio set-volume 60
+hypringo dispatch audio set-mute true
+hypringo dispatch audio toggle-mute
+```
+
+workspace ID 必须是整数，volume 只允许 0–100，其他字符串不会被当作 Hyprland、
+D-Bus 或 shell 命令执行。control socket 接收 action 后返回 `accepted`，实际
+source 错误会进入 daemon 日志。
 
 ## systemd user service
 
@@ -132,12 +178,16 @@ journalctl --user -u hypringo.service -f
 
 ```bash
 luamake -mode debug
-luamake -mode debug unit
+luamake -mode debug unit mpris_mock
 build/bin/unit test/unit.lua
 sh test/control.sh build/bin/hypringo
 sh test/hyprland.sh build/bin/hypringo
+sh test/mpris.sh build/bin/hypringo build/bin/mpris_mock
+sh test/audio.sh build/bin/hypringo
 ```
 
 Hyprland 集成测试只使用临时目录下的模拟 command/event socket，覆盖双屏热插拔、
 焦点迁移、拔屏、事件分包和断线重连；它不连接或修改当前 Hyprland、Eww 和旧版
-Hypringo 进程。
+Hypringo 进程。MPRIS 测试在私有 D-Bus session 中运行两个 mock player，覆盖稳定
+选择、signal 更新、typed action 和 player removal。audio 测试只读比较当前
+default sink 的 snapshot，不修改音量或静音状态。

@@ -1,8 +1,10 @@
+#include "audio.h"
 #include "embed.h"
 #include "host.h"
 #include "control.h"
 #include "ipc.h"
 #include "json.h"
+#include "mpris.h"
 
 #include <lauxlib.h>
 #include <lua.h>
@@ -50,11 +52,13 @@ main(int argc, char **argv) {
 
 	luaL_openlibs(L);
 	preload(L, "ltask.bootstrap", luaopen_ltask_bootstrap);
+	preload(L, "hypringo.audio", luaopen_hypringo_audio);
 	preload(L, "hypringo.embed", luaopen_hypringo_embed);
 	preload(L, "hypringo.host", luaopen_hypringo_host);
 	preload(L, "hypringo.control", luaopen_hypringo_control);
 	preload(L, "hypringo.ipc", luaopen_hypringo_ipc);
 	preload(L, "hypringo.json", luaopen_hypringo_json);
+	preload(L, "hypringo.mpris", luaopen_hypringo_mpris);
 
 	lua_pushcfunction(L, traceback);
 	if (hypringo_load_embedded(L, "hypringo.runtime", "@src/lualib/runtime.lua") != LUA_OK) {

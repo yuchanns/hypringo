@@ -27,11 +27,15 @@ local embedded_sources = {
 	"3rd/ltask/service/logger.lua",
 	"3rd/ltask/service/root.lua",
 	"3rd/ltask/service/timer.lua",
+	"src/lualib/actions.lua",
 	"src/lualib/config.lua",
 	"src/lualib/hyprland.lua",
 	"src/lualib/runtime.lua",
 	"src/lualib/state.lua",
+	"src/service/audio.lua",
 	"src/service/hyprland.lua",
+	"src/service/mpris.lua",
+	"src/service/actions.lua",
 	"src/service/main.lua",
 	"src/service/state.lua",
 }
@@ -107,7 +111,9 @@ lm:exe "hypringo" {
 		links = {
 			"dl",
 			"m",
+			"pulse",
 			"pthread",
+			"systemd",
 		},
 	},
 }
@@ -130,6 +136,17 @@ lm:exe "unit" {
 		links = {
 			"dl",
 			"m",
+		},
+	},
+}
+
+lm:exe "mpris_mock" {
+	sources = {
+		"test/mpris_mock.c",
+	},
+	gcc = {
+		links = {
+			"systemd",
 		},
 	},
 }

@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #define CONTROL_MAX_CLIENTS 64
+#define CONTROL_MAX_ACTIONS 64
 #define CONTROL_COMMAND_SIZE 128
 
 struct control_client {
@@ -35,6 +36,9 @@ struct control_server {
 	int listener;
 	int wake_read;
 	int wake_write;
+	char actions[CONTROL_MAX_ACTIONS][CONTROL_COMMAND_SIZE];
+	size_t action_head;
+	size_t action_count;
 	char *path;
 	char *snapshot;
 	size_t snapshot_size;
@@ -148,6 +152,22 @@ broadcast_snapshot(struct control_client *clients, size_t *count) {
 	}
 }
 
+static bool
+enqueue_action(const char *command) {
+	pthread_mutex_lock(&server.mutex);
+	if (!server.running || server.stopping ||
+		server.action_count >= CONTROL_MAX_ACTIONS) {
+		pthread_mutex_unlock(&server.mutex);
+		return false;
+	}
+	size_t index =
+		(server.action_head + server.action_count) % CONTROL_MAX_ACTIONS;
+	strcpy(server.actions[index], command);
+	server.action_count++;
+	pthread_mutex_unlock(&server.mutex);
+	return true;
+}
+
 static void
 handle_command(struct control_client *client, bool *close_client) {
 	client->command[client->command_size] = '\0';
@@ -172,6 +192,19 @@ handle_command(struct control_client *client, bool *close_client) {
 		if (!send_snapshot(client->fd, client->eww_format)) {
 			*close_client = true;
 		}
+		return;
+	}
+	if (strncmp(client->command, "dispatch ", 9) == 0) {
+		if (enqueue_action(client->command)) {
+			static const char accepted[] =
+				"{\"type\":\"accepted\"}\n";
+			write_all(client->fd, accepted, sizeof(accepted) - 1);
+		} else {
+			static const char busy[] =
+				"{\"type\":\"error\",\"error\":\"action queue unavailable\"}\n";
+			write_all(client->fd, busy, sizeof(busy) - 1);
+		}
+		*close_client = true;
 		return;
 	}
 	static const char error[] =
@@ -393,6 +426,24 @@ prepare_socket(lua_State *L, const char *path) {
 }
 
 static int
+create_control_pipe(int descriptors[2]) {
+	if (pipe(descriptors) < 0) {
+		return -1;
+	}
+	if (set_nonblocking(descriptors[0]) < 0 ||
+		set_nonblocking(descriptors[1]) < 0 ||
+		set_cloexec(descriptors[0]) < 0 ||
+		set_cloexec(descriptors[1]) < 0) {
+		int configure_error = errno;
+		close(descriptors[0]);
+		close(descriptors[1]);
+		errno = configure_error;
+		return -1;
+	}
+	return 0;
+}
+
+static int
 lstart(lua_State *L) {
 	const char *path = luaL_checkstring(L, 1);
 	pthread_mutex_lock(&server.mutex);
@@ -404,24 +455,18 @@ lstart(lua_State *L) {
 
 	int listener = prepare_socket(L, path);
 	int wake_pipe[2];
-	if (pipe(wake_pipe) < 0) {
+	if (create_control_pipe(wake_pipe) < 0) {
 		close(listener);
 		unlink(path);
 		return luaL_error(L, "cannot create control wake pipe: %s", strerror(errno));
-	}
-	if (set_nonblocking(wake_pipe[0]) < 0 || set_nonblocking(wake_pipe[1]) < 0 ||
-		set_cloexec(wake_pipe[0]) < 0 || set_cloexec(wake_pipe[1]) < 0) {
-		close(listener);
-		close(wake_pipe[0]);
-		close(wake_pipe[1]);
-		unlink(path);
-		return luaL_error(L, "cannot configure control wake pipe: %s", strerror(errno));
 	}
 
 	pthread_mutex_lock(&server.mutex);
 	server.listener = listener;
 	server.wake_read = wake_pipe[0];
 	server.wake_write = wake_pipe[1];
+	server.action_head = 0;
+	server.action_count = 0;
 	server.path = strdup(path);
 	server.stopping = false;
 	server.running = true;
@@ -511,6 +556,8 @@ lstop(lua_State *L) {
 	close_fd(&server.listener);
 	close_fd(&server.wake_read);
 	close_fd(&server.wake_write);
+	server.action_head = 0;
+	server.action_count = 0;
 	pthread_mutex_unlock(&server.mutex);
 	if (path != NULL) {
 		unlink(path);
@@ -520,13 +567,31 @@ lstop(lua_State *L) {
 }
 
 static int
+lpop_action(lua_State *L) {
+	pthread_mutex_lock(&server.mutex);
+	if (!server.running || server.stopping || server.action_count == 0) {
+		pthread_mutex_unlock(&server.mutex);
+		lua_pushnil(L);
+		return 1;
+	}
+	char action[CONTROL_COMMAND_SIZE];
+	strcpy(action, server.actions[server.action_head]);
+	server.action_head = (server.action_head + 1) % CONTROL_MAX_ACTIONS;
+	server.action_count--;
+	pthread_mutex_unlock(&server.mutex);
+	lua_pushstring(L, action);
+	return 1;
+}
+
+static int
 lrequest(lua_State *L) {
 	const char *path = luaL_checkstring(L, 1);
 	const char *command = luaL_checkstring(L, 2);
 	if (strcmp(command, "status") != 0 &&
 		strcmp(command, "subscribe") != 0 &&
 		strcmp(command, "status eww") != 0 &&
-		strcmp(command, "subscribe eww") != 0) {
+		strcmp(command, "subscribe eww") != 0 &&
+		strncmp(command, "dispatch ", 9) != 0) {
 		return luaL_error(L, "unsupported control command: %s", command);
 	}
 	int fd = connect_socket(path);
@@ -578,6 +643,7 @@ luaopen_hypringo_control(lua_State *L) {
 		{ "request", lrequest },
 		{ "start", lstart },
 		{ "stop", lstop },
+		{ "pop_action", lpop_action },
 		{ NULL, NULL },
 	};
 	luaL_newlib(L, library);

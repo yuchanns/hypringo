@@ -1,4 +1,5 @@
 local json = require "hypringo.json"
+local actions = assert(loadfile("src/lualib/actions.lua", "t"))()
 local hyprland = assert(loadfile("src/lualib/hyprland.lua", "t"))()
 local state = assert(loadfile("src/lualib/state.lua", "t"))()
 local config_module = assert(loadfile("src/lualib/config.lua", "t"))()
@@ -26,6 +27,37 @@ assert_equal(json.encode(json.decode "{}"), "{}")
 assert_equal(json.encode { ["a\0b"] = "value" }, '{"a\\u0000b":"value"}')
 assert_equal(json.decode "-9223372036854775808", math.mininteger)
 assert_equal(json.encode(math.mininteger), "-9223372036854775808")
+
+local action_command, action_error =
+	actions.from_cli { "workspace", "switch", "8" }
+assert_equal(action_error, nil)
+assert_equal(action_command, "dispatch workspace switch 8")
+local action = assert(actions.parse(action_command))
+assert_equal(action.domain, "workspace")
+assert_equal(action.name, "switch")
+assert_equal(action.value, 8)
+action_command, action_error =
+	actions.from_cli { "audio", "set-volume", "101" }
+assert_equal(action_command, nil)
+assert_equal(type(action_error), "string")
+action, action_error = actions.parse "dispatch media play-pause"
+assert_equal(action_error, nil)
+assert_equal(action.domain, "media")
+assert_equal(action.name, "play-pause")
+action, action_error = actions.parse "dispatch audio set-mute false"
+assert_equal(action_error, nil)
+assert_equal(action.domain, "audio")
+assert_equal(action.name, "set-mute")
+assert_equal(action.value, false)
+action, action_error = actions.parse "dispatch audio set-mute true"
+assert_equal(action_error, nil)
+assert_equal(action.value, true)
+action, action_error = actions.parse "dispatch audio set-mute maybe"
+assert_equal(action, nil)
+assert_equal(type(action_error), "string")
+action, action_error = actions.parse "dispatch workspace switch 8;shutdown"
+assert_equal(action, nil)
+assert_equal(type(action_error), "string")
 
 local decoded = json.decode '{"items":[1,null,\"\\ud83d\\ude80\"],\"ready\":true}'
 assert_equal(decoded.ready, true)
@@ -58,12 +90,22 @@ assert_equal(ok, false)
 local config = config_module.load "example/config.lua"
 assert_equal(config.runtime.workers, 2)
 assert(config.runtime.socket_path:match "/hypringo%.sock$")
+assert_equal(config.sources.audio.enabled, false)
 assert_equal(config.sources.hyprland.enabled, false)
+assert_equal(config.sources.mpris.enabled, false)
 
 local hyprland_config = config_module.load "test/config-hyprland.lua"
 assert_equal(hyprland_config.sources.hyprland.enabled, true)
 assert_equal(hyprland_config.sources.hyprland.reconnect_min_ms, 20)
 assert_equal(hyprland_config.sources.hyprland.reconnect_max_ms, 200)
+
+local all_sources_config = config_module.load "test/config-all-sources.lua"
+assert_equal(all_sources_config.runtime.workers, 4)
+assert_equal(all_sources_config.sources.audio.enabled, true)
+assert_equal(all_sources_config.sources.hyprland.enabled, true)
+assert_equal(all_sources_config.sources.mpris.enabled, true)
+ok = pcall(config_module.load, "test/config-too-few-workers.lua")
+assert_equal(ok, false)
 
 local snapshot = state.new("example/config.lua", config)
 assert_equal(snapshot.revision, 0)
@@ -96,8 +138,11 @@ assert_equal(changed, false)
 assert_equal(revision, 1)
 
 changed, revision = state.merge(snapshot, "media", {
+	album = "Album",
 	artist = "Artist",
+	art = "file:///art.png",
 	available = true,
+	error = "",
 	player = "test",
 	status = "playing",
 	title = "Title",
@@ -107,9 +152,11 @@ assert_equal(revision, 2)
 assert_equal(snapshot.state.media.title, "Title")
 
 changed, revision = state.merge(snapshot, "media", {
+	album = "",
 	artist = "",
 	art = "",
 	available = false,
+	error = "player unavailable",
 	player = "",
 	status = "stopped",
 	title = "",
@@ -117,6 +164,8 @@ changed, revision = state.merge(snapshot, "media", {
 assert_equal(changed, true)
 assert_equal(revision, 3)
 assert_equal(snapshot.state.media.available, false)
+assert_equal(snapshot.state.media.album, "")
+assert_equal(snapshot.state.media.error, "player unavailable")
 assert_equal(snapshot.state.media.title, "")
 
 local copied = state.copy(snapshot)

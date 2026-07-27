@@ -42,22 +42,4 @@ hyprctl -j monitors |
 		esac
 	done
 
-if ! eww ping >/dev/null 2>&1; then
-	eww daemon
-	for attempt in $(seq 1 20); do
-		if eww ping >/dev/null 2>&1; then
-			break
-		fi
-		sleep 0.1
-	done
-fi
-
-monitor_count=$(hyprctl -j monitors | jq 'length')
-active_windows=$(eww active-windows)
-if [ "$monitor_count" -gt 1 ] &&
-	! printf '%s\n' "$active_windows" | grep -q '^bar:'; then
-	eww open bar
-fi
-if ! printf '%s\n' "$active_windows" | grep -q '^builtin:'; then
-	eww open builtin
-fi
+systemctl --user start hypringo-eww.service

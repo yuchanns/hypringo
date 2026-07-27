@@ -1,0 +1,26 @@
+#!/bin/sh
+set -u
+
+binary=${HYPRINGO_BIN:-hypringo}
+child=
+
+stop() {
+	if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then
+		kill -TERM "$child" 2>/dev/null || true
+		wait "$child" 2>/dev/null || true
+	fi
+	exit 0
+}
+trap stop INT TERM
+
+while :; do
+	"$binary" subscribe --format eww "$@" &
+	child=$!
+	wait "$child" 2>/dev/null || true
+	child=
+
+	sleep 1 &
+	child=$!
+	wait "$child" 2>/dev/null || true
+	child=
+done

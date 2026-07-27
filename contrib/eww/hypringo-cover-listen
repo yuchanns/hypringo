@@ -1,0 +1,51 @@
+#!/bin/sh
+set -u
+
+cache_dir=${XDG_CACHE_HOME:-"$HOME/.cache"}/hypringo
+current_url=
+
+umask 077
+mkdir -p "$cache_dir"
+
+hypringo-eww-listen |
+	jq --unbuffered -r '.media.art // ""' |
+	while IFS= read -r art_url; do
+		if [ "$art_url" = "$current_url" ]; then
+			continue
+		fi
+		current_url=$art_url
+
+		case "$art_url" in
+		https://*)
+			cache_key=$(printf '%s' "$art_url" | sha256sum | cut -d ' ' -f 1)
+			cache_path="$cache_dir/media-$cache_key"
+			if [ ! -s "$cache_path" ]; then
+				temp_path=$(mktemp "$cache_dir/media.XXXXXX")
+				if ! curl \
+					--connect-timeout 5 \
+					--fail \
+					--location \
+					--max-filesize 10485760 \
+					--max-redirs 3 \
+					--max-time 15 \
+					--output "$temp_path" \
+					--proto '=https' \
+					--silent \
+					--show-error \
+					"$art_url"; then
+					rm -f "$temp_path"
+					printf '\n'
+					continue
+				fi
+				mv "$temp_path" "$cache_path"
+			fi
+			printf '%s\n' "$cache_path"
+			;;
+		file://* | /*)
+			printf '%s\n' "$art_url"
+			;;
+		*)
+			printf '\n'
+			;;
+		esac
+	done

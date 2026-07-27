@@ -1,0 +1,63 @@
+#!/bin/sh
+set -eu
+
+systemctl --user import-environment \
+	HYPRLAND_INSTANCE_SIGNATURE \
+	WAYLAND_DISPLAY \
+	XDG_CURRENT_DESKTOP \
+	XDG_SESSION_TYPE
+systemctl --user start hypringo.service
+
+if ! pgrep -x swww-daemon >/dev/null 2>&1; then
+	swww-daemon >/dev/null 2>&1 &
+	for attempt in $(seq 1 20); do
+		if swww query >/dev/null 2>&1; then
+			break
+		fi
+		sleep 0.1
+	done
+fi
+
+hyprctl -j monitors |
+	jq -r '.[].name' |
+	while IFS= read -r monitor_name; do
+		case "$monitor_name" in
+		HDMI-A-1)
+			swww img \
+				"$HOME/.config/hypr/assets/wallpapers/background_01.jpg" \
+				--outputs "$monitor_name"
+			;;
+		HDMI-A-2)
+			hyprctl keyword monitor \
+				"$monitor_name,preferred,0x0,1" >/dev/null
+			swww img \
+				"$HOME/.config/hypr/assets/wallpapers/background_03.jpg" \
+				--outputs "$monitor_name"
+			;;
+		eDP-1)
+			swww img \
+				"$HOME/.config/hypr/assets/wallpapers/background_03.jpg" \
+				--outputs "$monitor_name"
+			;;
+		esac
+	done
+
+if ! eww ping >/dev/null 2>&1; then
+	eww daemon
+	for attempt in $(seq 1 20); do
+		if eww ping >/dev/null 2>&1; then
+			break
+		fi
+		sleep 0.1
+	done
+fi
+
+monitor_count=$(hyprctl -j monitors | jq 'length')
+active_windows=$(eww active-windows)
+if [ "$monitor_count" -gt 1 ] &&
+	! printf '%s\n' "$active_windows" | grep -q '^bar:'; then
+	eww open bar
+fi
+if ! printf '%s\n' "$active_windows" | grep -q '^builtin:'; then
+	eww open builtin
+fi

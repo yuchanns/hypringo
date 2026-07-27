@@ -107,6 +107,7 @@ local function build_service_loader()
 	local service_names = {
 		"actions",
 		"audio",
+		"github",
 		"hyprland",
 		"logger",
 		"main",
@@ -114,6 +115,7 @@ local function build_service_loader()
 		"root",
 		"state",
 		"timer",
+		"weather",
 	}
 	local lines = {
 		"local services = {",
@@ -128,6 +130,7 @@ local function build_service_loader()
 		"hypringo.config",
 		"hypringo.doctor",
 		"hypringo.hyprland",
+		"hypringo.remote",
 		"hypringo.state",
 	} do
 		lines[#lines + 1] = ("[%q] = %q,"):format(name, embed.get(name))
@@ -190,9 +193,27 @@ local function start(config_path, config)
 			},
 		}
 	end
+	if config.sources.github.enabled then
+		bootstrap_services[#bootstrap_services + 1] = {
+			name = "github",
+			unique = true,
+			args = {
+				config,
+			},
+		}
+	end
 	if config.sources.mpris.enabled then
 		bootstrap_services[#bootstrap_services + 1] = {
 			name = "mpris",
+			unique = true,
+			args = {
+				config,
+			},
+		}
+	end
+	if config.sources.weather.enabled then
+		bootstrap_services[#bootstrap_services + 1] = {
+			name = "weather",
 			unique = true,
 			args = {
 				config,

@@ -15,15 +15,15 @@ Better Utilize Hyprland in Your Asahi Linux.
 当前分支提供 Hypringo 的事件驱动运行时：单个原生可执行文件内嵌 Lua
 5.5、ltask、yyjson 与内部 Lua service，外部 `config.lua` 作为唯一用户入口。
 进程内包含单写者状态服务、本地 Unix control socket，以及可独立启用的
-Hyprland、MPRIS 和 PipeWire-Pulse source。workspace、媒体和音频操作统一经过
+Hyprland、MPRIS、PipeWire-Pulse、weather 和 GitHub source。workspace、媒体和音频操作统一经过
 校验后的 typed dispatch，不向 source 透传任意命令。`doctor` 提供统一的
-source 健康与 capability 视图；配置 reload 仅热更新连接退避参数，不会在运行中
-悄悄改变 service topology。
+source 健康与 capability 视图；配置 reload 只热更新 source 自身 policy，不会在
+运行中悄悄改变 service topology。
 
 ## 构建
 
-需要较新的 [luamake](https://github.com/actboy168/luamake)、systemd 开发库和
-PulseAudio 客户端开发库。音频 source 通过 PipeWire 的 PulseAudio 兼容服务工作，
+需要较新的 [luamake](https://github.com/actboy168/luamake)、systemd、libcurl
+和 PulseAudio 客户端开发库。音频 source 通过 PipeWire 的 PulseAudio 兼容服务工作，
 不要求链接 PipeWire 私有 ABI。首次检出后初始化三个源码 submodule，再构建
 release 版本：
 
@@ -65,13 +65,19 @@ return {
 		mpris = {
 			enabled = true,
 		},
+		github = {
+			enabled = false,
+		},
+		weather = {
+			enabled = false,
+		},
 	},
 }
 ```
 
 `socket_path` 必须是绝对路径；通常不需要配置，保留 XDG 默认值即可。每个启用的
-source 都有一个阻塞式 event waiter，因此 `runtime.workers` 必须大于启用的 source
-数量；全部启用时使用至少 4 个 worker。
+source 都有一个阻塞式 waiter 或有界 HTTP 请求，因此 `runtime.workers` 必须大于
+启用的 source 数量；五个 source 全部启用时使用至少 6 个 worker。
 
 Hyprland source 默认关闭，启用后会从
 `$XDG_RUNTIME_DIR/hypr/$HYPRLAND_INSTANCE_SIGNATURE/.socket.sock`
@@ -112,6 +118,42 @@ audio source 使用 libpulse 订阅 server/sink 事件，并始终跟随当前 d
 这在标准 PipeWire 桌面上连接的是 PipeWire-Pulse 服务，不启动轮询命令或临时子进程。
 默认 sink 或音频服务不可用时会设置 `audio.available=false` 并清空旧值。
 
+weather 与 GitHub 是低频远程 source，使用进程内 libcurl，不启动 `curl`、`gh`
+或其他轮询子进程。每个请求都有 connect/total timeout、响应体大小上限和
+HTTP(S)-only redirect 边界；失败按指数退避重试，GitHub 还会遵守
+`Retry-After`、rate-limit reset、`X-Poll-Interval` 与 ETag/304。一个远程 source
+超时不会阻塞另一个 source 或本地事件源。
+
+weather endpoint 必须返回一个小型 JSON object，字段为 `cond`、`temp`、`loc`、
+`wind`、`pressure`、`precip` 和 `temp_like`。例如可把 wttr.in 的 format API
+配置为该投影；location 由 URL 决定，不写死在运行时：
+
+```lua
+weather = {
+	enabled = true,
+	interval_ms = 600000,
+	timeout_ms = 10000,
+	url = "https://wttr.in/Shenzhen?format=%7B%22cond%22:%22%c%22,%22temp%22:%22%t%22,%22loc%22:%22%l%22,%22wind%22:%22%w%22,%22pressure%22:%22%P%22,%22precip%22:%22%p%22,%22temp_like%22:%22%f%22%7D",
+}
+```
+
+GitHub source 调用 notifications API，只保留最多 `max_items` 个通知的
+id/reason/unread/update time、repository name/URL 和 subject title/type/URL，
+不会把完整 API payload 推给 Eww。token 只从配置指定的环境变量读取，不写入
+snapshot、doctor 或日志：
+
+```lua
+github = {
+	enabled = true,
+	interval_ms = 60000,
+	max_items = 50,
+	token_env = "HYPRINGO_GITHUB_TOKEN",
+}
+```
+
+systemd 部署时应通过权限为 `0600` 的 user-service `EnvironmentFile` override
+提供该变量；不要把 token 写进 `config.lua` 或 unit 文件。
+
 ## 状态与 Eww 数据流
 
 运行中的 Hypringo 维护带单调 revision 的规范化状态。`status` 读取一次当前 snapshot，`subscribe` 会先重放当前 snapshot，再持续输出后续 revision；每一行都是完整 JSON，订阅者无需自己修补丢失的增量：
@@ -123,9 +165,13 @@ hypringo subscribe --format eww
 hypringo status --socket /path/to/hypringo.sock
 ```
 
-当前 snapshot 已定义 `runtime`、`hyprland`、`media` 和 `audio` 四个稳定
-domain。任一 source 不可用时会明确输出 `available=false` 以及清空后的状态，而
-不是保留上一次成功值。control socket 权限固定为 `0600`；第二个 daemon 会拒绝
+当前 snapshot 已定义 `runtime`、`hyprland`、`media`、`audio`、`weather` 和
+`github` 六个稳定
+domain。本地事件 source 不可用时会明确输出 `available=false` 并清空失效状态。
+远程 source 首次成功后若刷新失败，会保留最后一份
+可展示数据，同时设置 `stale=true`、`error`、`failures`、`last_success_at` 和
+`refresh_in_ms`；因此 UI 可以明确标记缓存数据，而不是在网络抖动时清空组件。
+control socket 权限固定为 `0600`；第二个 daemon 会拒绝
 抢占仍活跃的 socket，进程异常退出留下的 stale socket 会在下一次启动时安全回收。
 
 `doctor` 将配置中的 enabled source 与当前状态合并为 `disabled`、`ready` 或
@@ -184,8 +230,9 @@ hypringo reload
 hypringo doctor
 ```
 
-当前只允许热更新三个 source 的 `reconnect_min_ms` 和
-`reconnect_max_ms`。`runtime.workers`、control socket、source enabled 状态以及
+当前允许热更新本地 source 的 reconnect policy，以及远程 source 的 endpoint、
+timeout/interval/retry/response limit、GitHub token 环境变量名和投影上限。
+`runtime.workers`、control socket、source enabled 状态以及
 Hyprland command/event socket 都决定进程拓扑或已打开资源；修改它们时 reload
 会保留旧配置、保持 generation 不变，并在 `last_reload_error` 中返回
 `restart required`。配置语法或校验失败也不会部分应用；修复文件并再次 reload
@@ -228,6 +275,7 @@ build/bin/unit test/unit.lua
 sh test/control.sh build/bin/hypringo
 sh test/reload.sh build/bin/hypringo
 sh test/lifecycle.sh build/bin/hypringo
+sh test/remote.sh build/bin/hypringo
 sh test/hyprland.sh build/bin/hypringo
 sh test/mpris.sh build/bin/hypringo build/bin/mpris_mock
 sh test/audio.sh build/bin/hypringo
@@ -241,3 +289,6 @@ Hypringo 进程。MPRIS 测试在私有 D-Bus session 中运行两个 mock playe
 不存在开始监听，执行一次强制崩溃和 stale-socket 恢复，并验证 Eww 收到新进程的
 完整 replay 且 listener 没有遗留子进程。audio 测试只读比较当前 default sink 的
 snapshot，不修改音量或静音状态。
+remote 测试使用本地 HTTP mock，覆盖 timeout、响应体上限、ETag/304、
+`Retry-After`、stale 数据保留、指数退避、字段投影和两个远程 source 的故障隔离；
+不访问真实 weather/GitHub 服务。

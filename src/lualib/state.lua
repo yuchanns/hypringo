@@ -4,9 +4,11 @@ local M = {}
 
 local domains = {
 	audio = true,
+	github = true,
 	hyprland = true,
 	media = true,
 	runtime = true,
+	weather = true,
 }
 
 local function copy(value, visiting)
@@ -99,6 +101,16 @@ function M.new(config_path, config)
 				monitors = json.array(),
 				workspaces = json.array(),
 			},
+			github = {
+				available = false,
+				error = "",
+				failures = 0,
+				last_attempt_at = 0,
+				last_success_at = 0,
+				notifications = json.array(),
+				refresh_in_ms = 0,
+				stale = false,
+			},
 			media = {
 				album = "",
 				artist = "",
@@ -124,6 +136,22 @@ function M.new(config_path, config)
 				ready = false,
 				socket_path = config.runtime.socket_path,
 				workers = config.runtime.workers,
+			},
+			weather = {
+				available = false,
+				condition = "",
+				error = "",
+				failures = 0,
+				feels_like = "",
+				last_attempt_at = 0,
+				last_success_at = 0,
+				location = "",
+				precipitation = "",
+				pressure = "",
+				refresh_in_ms = 0,
+				stale = false,
+				temperature = "",
+				wind = "",
 			},
 		},
 	}

@@ -13,5 +13,11 @@ return {
 		mpris = {
 			enabled = false,
 		},
+		github = {
+			enabled = false,
+		},
+		weather = {
+			enabled = false,
+		},
 	},
 }

@@ -10,14 +10,17 @@ local sources = {
 	{ "hypringo.config", "src/lualib/config.lua" },
 	{ "hypringo.doctor", "src/lualib/doctor.lua" },
 	{ "hypringo.hyprland", "src/lualib/hyprland.lua" },
+	{ "hypringo.remote", "src/lualib/remote.lua" },
 	{ "hypringo.runtime", "src/lualib/runtime.lua" },
 	{ "hypringo.state", "src/lualib/state.lua" },
 	{ "service.actions", "src/service/actions.lua" },
 	{ "service.audio", "src/service/audio.lua" },
+	{ "service.github", "src/service/github.lua" },
 	{ "service.hyprland", "src/service/hyprland.lua" },
 	{ "service.mpris", "src/service/mpris.lua" },
 	{ "service.main", "src/service/main.lua" },
 	{ "service.state", "src/service/state.lua" },
+	{ "service.weather", "src/service/weather.lua" },
 }
 
 local function read_all(path)

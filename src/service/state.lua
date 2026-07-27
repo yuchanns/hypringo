@@ -59,7 +59,13 @@ function S.reload()
 	if not reloadable then
 		return reload_failed(compatibility_error)
 	end
-	for _, source_name in ipairs { "audio", "hyprland", "mpris" } do
+	for _, source_name in ipairs {
+		"audio",
+		"github",
+		"hyprland",
+		"mpris",
+		"weather",
+	} do
 		if candidate.sources[source_name].enabled then
 			local service = ltask.queryservice(source_name)
 			local called, reloaded, reload_error =

@@ -2,6 +2,7 @@ local json = require "hypringo.json"
 local actions = assert(loadfile("src/lualib/actions.lua", "t"))()
 local doctor = assert(loadfile("src/lualib/doctor.lua", "t"))()
 local hyprland = assert(loadfile("src/lualib/hyprland.lua", "t"))()
+local remote = assert(loadfile("src/lualib/remote.lua", "t"))()
 local state = assert(loadfile("src/lualib/state.lua", "t"))()
 local config_module = assert(loadfile("src/lualib/config.lua", "t"))()
 
@@ -94,6 +95,8 @@ assert(config.runtime.socket_path:match "/hypringo%.sock$")
 assert_equal(config.sources.audio.enabled, false)
 assert_equal(config.sources.hyprland.enabled, false)
 assert_equal(config.sources.mpris.enabled, false)
+assert_equal(config.sources.github.enabled, false)
+assert_equal(config.sources.weather.enabled, false)
 
 local hyprland_config = config_module.load "test/config-hyprland.lua"
 assert_equal(hyprland_config.sources.hyprland.enabled, true)
@@ -105,7 +108,18 @@ assert_equal(all_sources_config.runtime.workers, 4)
 assert_equal(all_sources_config.sources.audio.enabled, true)
 assert_equal(all_sources_config.sources.hyprland.enabled, true)
 assert_equal(all_sources_config.sources.mpris.enabled, true)
+local remote_config = config_module.load "test/config-remote.lua"
+assert_equal(remote_config.runtime.workers, 3)
+assert_equal(remote_config.sources.github.enabled, true)
+assert_equal(remote_config.sources.github.max_items, 7)
+assert_equal(
+	remote_config.sources.github.token_env,
+	"HYPRINGO_TEST_GITHUB_TOKEN")
+assert_equal(remote_config.sources.weather.enabled, true)
+assert_equal(remote_config.sources.weather.interval_ms, 600000)
 ok = pcall(config_module.load, "test/config-too-few-workers.lua")
+assert_equal(ok, false)
+ok = pcall(config_module.load, "test/config-invalid-remote.lua")
 assert_equal(ok, false)
 local reload_current = config_module.load "test/config-all-sources.lua"
 local reload_candidate = config_module.load "test/config-all-sources.lua"
@@ -120,6 +134,18 @@ reloadable, reload_error =
 assert_equal(reloadable, false)
 assert(reload_error:match "restart required")
 assert(reload_error:match "runtime%.workers")
+reload_current = config_module.load "test/config-remote.lua"
+reload_candidate = config_module.load "test/config-remote.lua"
+reload_candidate.sources.weather.interval_ms = 900000
+reloadable, reload_error =
+	config_module.reloadable(reload_current, reload_candidate)
+assert_equal(reloadable, true)
+assert_equal(reload_error, nil)
+reload_candidate.sources.weather.enabled = false
+reloadable, reload_error =
+	config_module.reloadable(reload_current, reload_candidate)
+assert_equal(reloadable, false)
+assert(reload_error:match "sources%.weather%.enabled")
 
 local snapshot = state.new("example/config.lua", config)
 assert_equal(snapshot.revision, 0)
@@ -158,8 +184,10 @@ local healthy_doctor = doctor.build(snapshot, config)
 assert_equal(healthy_doctor.type, "doctor")
 assert_equal(healthy_doctor.healthy, true)
 assert_equal(healthy_doctor.sources.audio.status, "disabled")
+assert_equal(healthy_doctor.sources.github.status, "disabled")
 assert_equal(healthy_doctor.sources.hyprland.status, "disabled")
 assert_equal(healthy_doctor.sources.mpris.status, "disabled")
+assert_equal(healthy_doctor.sources.weather.status, "disabled")
 
 local degraded_snapshot =
 	state.new("test/config-all-sources.lua", all_sources_config)
@@ -180,6 +208,87 @@ assert_equal(ready_doctor.healthy, true)
 assert_equal(ready_doctor.sources.audio.status, "ready")
 assert_equal(ready_doctor.sources.hyprland.status, "ready")
 assert_equal(ready_doctor.sources.mpris.status, "ready")
+
+assert_equal(remote.exponential_delay(1, 100, 800), 100)
+assert_equal(remote.exponential_delay(3, 100, 800), 400)
+assert_equal(remote.exponential_delay(8, 100, 800), 800)
+assert_equal(remote.success_delay({ x_poll_interval = "5" }, 1000), 5000)
+assert_equal(
+	remote.failure_delay(
+		{ retry_after = "2" },
+		1,
+		{
+			retry_max_ms = 800,
+			retry_min_ms = 100,
+		},
+		100),
+	2000)
+local weather = remote.parse_weather [[
+{
+	"cond": "Sunny",
+	"loc": "Shenzhen",
+	"precip": "0.0mm",
+	"pressure": "1012hPa",
+	"temp": "+30°C",
+	"temp_like": "+32°C",
+	"wind": "8km/h"
+}
+]]
+assert_equal(weather.condition, "Sunny")
+assert_equal(weather.location, "Shenzhen")
+assert_equal(weather.temperature, "+30°C")
+local notifications = remote.parse_github([[
+[
+	{
+		"id": "1",
+		"reason": "mention",
+		"repository": {
+			"full_name": "owner/repo",
+			"html_url": "https://github.com/owner/repo"
+		},
+		"subject": {
+			"title": "Review requested",
+			"type": "PullRequest",
+			"url": "https://api.github.com/repos/owner/repo/pulls/7"
+		},
+		"unread": true,
+		"updated_at": "2026-07-27T00:00:00Z"
+	},
+	{
+		"id": "2",
+		"repository": {
+			"full_name": "owner/second"
+		},
+		"subject": {
+			"title": "Issue updated",
+			"type": "Issue"
+		}
+	}
+]
+]], 1)
+assert_equal(json.is_array(notifications), true)
+assert_equal(#notifications, 1)
+assert_equal(notifications[1].subject.title, "Review requested")
+assert_equal(notifications[1].repository.full_name, "owner/repo")
+
+local remote_snapshot =
+	state.new("test/config-remote.lua", remote_config)
+state.merge(remote_snapshot, "runtime", { ready = true })
+local remote_doctor = doctor.build(remote_snapshot, remote_config)
+assert_equal(remote_doctor.healthy, false)
+assert_equal(remote_doctor.sources.github.status, "degraded")
+assert_equal(remote_doctor.sources.weather.status, "degraded")
+state.merge(remote_snapshot, "weather", {
+	available = true,
+	stale = false,
+})
+state.merge(remote_snapshot, "github", {
+	available = true,
+	stale = true,
+})
+remote_doctor = doctor.build(remote_snapshot, remote_config)
+assert_equal(remote_doctor.sources.weather.status, "ready")
+assert_equal(remote_doctor.sources.github.status, "degraded")
 
 changed, revision = state.merge(snapshot, "media", {
 	album = "Album",

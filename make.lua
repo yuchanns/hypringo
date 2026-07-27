@@ -31,14 +31,17 @@ local embedded_sources = {
 	"src/lualib/config.lua",
 	"src/lualib/doctor.lua",
 	"src/lualib/hyprland.lua",
+	"src/lualib/remote.lua",
 	"src/lualib/runtime.lua",
 	"src/lualib/state.lua",
 	"src/service/audio.lua",
+	"src/service/github.lua",
 	"src/service/hyprland.lua",
 	"src/service/mpris.lua",
 	"src/service/actions.lua",
 	"src/service/main.lua",
 	"src/service/state.lua",
+	"src/service/weather.lua",
 }
 
 local generated_header = lm.basedir / lm.builddir / "embedded_sources.h"
@@ -111,6 +114,7 @@ lm:exe "hypringo" {
 	gcc = {
 		links = {
 			"dl",
+			"curl",
 			"m",
 			"pulse",
 			"pthread",

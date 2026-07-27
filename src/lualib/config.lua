@@ -61,6 +61,76 @@ local function validate_milliseconds(value, path, fallback)
 	return value
 end
 
+local function validate_integer(value, path, fallback, minimum, maximum)
+	value = value or fallback
+	if math.type(value) ~= "integer" or value < minimum or value > maximum then
+		error(
+			("configuration field %s must be an integer between %d and %d"):format(
+				path,
+				minimum,
+				maximum))
+	end
+	return value
+end
+
+local function validate_url(value, path)
+	if type(value) ~= "string" or
+		not value:match "^https?://[^%s]+$" then
+		error(
+			("configuration field %s must be a non-empty HTTP or HTTPS URL"):format(
+				path))
+	end
+	return value
+end
+
+local function validate_remote_source(source, path, defaults)
+	if source.enabled == nil then
+		source.enabled = false
+	elseif type(source.enabled) ~= "boolean" then
+		error(("configuration field %s.enabled must be a boolean"):format(path))
+	end
+	source.interval_ms = validate_integer(
+		source.interval_ms,
+		path .. ".interval_ms",
+		defaults.interval_ms,
+		100,
+		86400000)
+	source.timeout_ms = validate_integer(
+		source.timeout_ms,
+		path .. ".timeout_ms",
+		defaults.timeout_ms,
+		10,
+		600000)
+	source.retry_min_ms = validate_integer(
+		source.retry_min_ms,
+		path .. ".retry_min_ms",
+		defaults.retry_min_ms,
+		100,
+		86400000)
+	source.retry_max_ms = validate_integer(
+		source.retry_max_ms,
+		path .. ".retry_max_ms",
+		defaults.retry_max_ms,
+		100,
+		86400000)
+	if source.retry_max_ms < source.retry_min_ms then
+		error(
+			("configuration field %s.retry_max_ms must not be less than retry_min_ms"):format(
+				path))
+	end
+	source.max_response_bytes = validate_integer(
+		source.max_response_bytes,
+		path .. ".max_response_bytes",
+		defaults.max_response_bytes,
+		1,
+		16 * 1024 * 1024)
+	if source.enabled then
+		source.url = validate_url(source.url or defaults.url, path .. ".url")
+	elseif source.url ~= nil then
+		source.url = validate_url(source.url, path .. ".url")
+	end
+end
+
 local function validate_value(value, path, visiting, validated)
 	local value_type = type(value)
 	if value_type == "nil" or value_type == "boolean" or value_type == "number" or value_type == "string" then
@@ -188,15 +258,46 @@ function M.load(path)
 		error "configuration field sources.audio.reconnect_max_ms must not be less than reconnect_min_ms"
 	end
 
+	local weather = require_table(sources, "weather", "sources.weather")
+	validate_remote_source(weather, "sources.weather", {
+		interval_ms = 600000,
+		max_response_bytes = 65536,
+		retry_max_ms = 300000,
+		retry_min_ms = 5000,
+		timeout_ms = 10000,
+	})
+
+	local github = require_table(sources, "github", "sources.github")
+	validate_remote_source(github, "sources.github", {
+		interval_ms = 60000,
+		max_response_bytes = 1024 * 1024,
+		retry_max_ms = 900000,
+		retry_min_ms = 5000,
+		timeout_ms = 10000,
+		url = "https://api.github.com/notifications?per_page=100",
+	})
+	github.max_items = validate_integer(
+		github.max_items,
+		"sources.github.max_items",
+		50,
+		1,
+		100)
+	github.token_env = github.token_env or "HYPRINGO_GITHUB_TOKEN"
+	if type(github.token_env) ~= "string" or
+		not github.token_env:match "^[A-Za-z_][A-Za-z0-9_]*$" then
+		error(
+			"configuration field sources.github.token_env must be an environment variable name")
+	end
+
 	local blocking_sources = 0
-	for _, source in ipairs { hyprland, mpris, audio } do
+	for _, source in ipairs { hyprland, mpris, audio, weather, github } do
 		if source.enabled then
 			blocking_sources = blocking_sources + 1
 		end
 	end
 	if runtime.workers <= blocking_sources then
 		error(
-			("configuration field runtime.workers must be greater than the number of enabled event sources (%d)"):format(
+			("configuration field runtime.workers must be greater than the number of enabled blocking sources (%d)"):format(
 				blocking_sources))
 	end
 
@@ -221,7 +322,13 @@ function M.reloadable(current, candidate)
 			"runtime.socket_path",
 		},
 	}
-	for _, source_name in ipairs { "audio", "hyprland", "mpris" } do
+	for _, source_name in ipairs {
+		"audio",
+		"github",
+		"hyprland",
+		"mpris",
+		"weather",
+	} do
 		immutable[#immutable + 1] = {
 			current.sources[source_name].enabled,
 			candidate.sources[source_name].enabled,

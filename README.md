@@ -252,11 +252,25 @@ reconnects automatically after a daemon crash or restart:
 ```bash
 install -Dm755 contrib/eww/hypringo-listen \
   ~/.local/bin/hypringo-eww-listen
+install -Dm755 contrib/eww/hypringo-bars \
+  ~/.local/bin/hypringo-bars
+install -Dm755 contrib/eww/hypringo-eww-session \
+  ~/.local/bin/hypringo-eww-session
+install -Dm644 contrib/systemd/hypringo-eww.service \
+  ~/.config/systemd/user/hypringo-eww.service
 ```
 
 `contrib/eww/hypringo.yuck` invokes this adapter by default. The adapter does
 not parse or cache JSON. After reconnecting, it relies on the daemon's complete
 snapshot replay and cannot mix stale deltas into a new process state.
+
+`hypringo-bars` consumes the same complete snapshot stream and reconciles one
+Eww `bar` instance per current Hyprland monitor. Instances use monitor names as
+stable identities and pass each name through the window's `monitor-name`
+argument. An Eww configuration using this adapter must therefore define
+`(defwindow bar [monitor-name] ...)`. `hypringo-eww-session` owns both the Eww
+daemon and this monitor reconciler, so a crash of either process restarts the
+complete UI session instead of leaving stale or duplicate layer surfaces.
 
 ## Typed dispatch
 
@@ -311,16 +325,20 @@ session environment into the user manager, then enable the service:
 install -Dm755 build/bin/hypringo ~/.local/bin/hypringo
 install -Dm755 contrib/eww/hypringo-listen ~/.local/bin/hypringo-eww-listen
 install -Dm755 contrib/eww/hypringo-cover-listen ~/.local/bin/hypringo-cover-listen
+install -Dm755 contrib/eww/hypringo-bars ~/.local/bin/hypringo-bars
+install -Dm755 contrib/eww/hypringo-eww-session ~/.local/bin/hypringo-eww-session
 install -Dm644 contrib/systemd/hypringo.service ~/.config/systemd/user/hypringo.service
+install -Dm644 contrib/systemd/hypringo-eww.service ~/.config/systemd/user/hypringo-eww.service
 systemctl --user import-environment WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
 systemctl --user daemon-reload
-systemctl --user enable --now hypringo.service
+systemctl --user enable --now hypringo.service hypringo-eww.service
 ```
 
 Inspect logs and configuration errors with:
 
 ```bash
 journalctl --user -u hypringo.service -f
+systemctl --user status hypringo-eww.service
 systemctl --user reload hypringo.service
 hypringo doctor
 ```

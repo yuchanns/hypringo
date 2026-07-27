@@ -1,0 +1,84 @@
+#!/bin/sh
+set -eu
+
+eww_binary=${EWW_BIN:-eww}
+eww_config=${EWW_CONFIG_DIR:-"$HOME/.config/eww"}
+listener=${HYPRINGO_EWW_LISTENER:-hypringo-eww-listen}
+id_prefix=hypringo-bar-
+window_name=bar
+runtime_dir=${XDG_RUNTIME_DIR:-"/run/user/$(id -u)"}
+desired_file=$(mktemp "$runtime_dir/hypringo-eww-bars.XXXXXX")
+previous_monitors=
+
+cleanup() {
+	rm -f "$desired_file"
+}
+trap cleanup EXIT HUP INT TERM
+
+window_id() {
+	printf '%s%s\n' "$id_prefix" "$1"
+}
+
+sync_bars() {
+	monitors_json=$1
+	active_windows=$("$eww_binary" -c "$eww_config" active-windows)
+	monitor_names=$(printf '%s\n' "$monitors_json" | jq -r '.[]')
+
+	: >"$desired_file"
+	while IFS= read -r monitor_name; do
+		[ -n "$monitor_name" ] || continue
+		case "$monitor_name" in
+		*[!A-Za-z0-9._-]*)
+			printf 'hypringo-bars: unsupported monitor name: %s\n' \
+				"$monitor_name" >&2
+			return 1
+			;;
+		esac
+
+		instance_id=$(window_id "$monitor_name")
+		printf '%s\n' "$instance_id" >>"$desired_file"
+		if ! printf '%s\n' "$active_windows" |
+			grep -Fqx "$instance_id: $window_name"; then
+			"$eww_binary" -c "$eww_config" open "$window_name" \
+				--id "$instance_id" \
+				--screen "$monitor_name" \
+				--arg "monitor-name=$monitor_name"
+		fi
+	done <<EOF
+$monitor_names
+EOF
+
+	while IFS=: read -r instance_id active_window; do
+		active_window=${active_window# }
+		case "$instance_id" in
+		"$id_prefix"*)
+			if [ "$active_window" = "$window_name" ] &&
+				! grep -Fxq "$instance_id" "$desired_file"; then
+				"$eww_binary" -c "$eww_config" close "$instance_id"
+			fi
+			;;
+		esac
+	done <<EOF
+$active_windows
+EOF
+}
+
+"$listener" |
+	jq --unbuffered -c '
+		[
+			.hyprland.monitors[]?
+			| .name
+			| select(type == "string" and length > 0)
+		]
+		| sort
+		| unique
+	' |
+	while IFS= read -r monitors_json; do
+		if [ "$monitors_json" = "$previous_monitors" ]; then
+			continue
+		fi
+		sync_bars "$monitors_json"
+		previous_monitors=$monitors_json
+	done
+
+exit 1

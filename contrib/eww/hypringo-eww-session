@@ -1,0 +1,57 @@
+#!/bin/sh
+set -eu
+
+eww_binary=${EWW_BIN:-eww}
+eww_config=${EWW_CONFIG_DIR:-"$HOME/.config/eww"}
+bar_manager=${HYPRINGO_EWW_BAR_MANAGER:-hypringo-bars}
+eww_pid=
+bar_pid=
+
+cleanup() {
+	trap - EXIT HUP INT TERM
+	if [ -n "$bar_pid" ] && kill -0 "$bar_pid" 2>/dev/null; then
+		kill -TERM "$bar_pid" 2>/dev/null || true
+	fi
+	if [ -n "$eww_pid" ] && kill -0 "$eww_pid" 2>/dev/null; then
+		kill -TERM "$eww_pid" 2>/dev/null || true
+	fi
+	[ -z "$bar_pid" ] || wait "$bar_pid" 2>/dev/null || true
+	[ -z "$eww_pid" ] || wait "$eww_pid" 2>/dev/null || true
+}
+trap cleanup EXIT HUP INT TERM
+
+if "$eww_binary" -c "$eww_config" ping >/dev/null 2>&1; then
+	printf 'hypringo-eww-session: an Eww daemon already owns %s\n' \
+		"$eww_config" >&2
+	exit 1
+fi
+
+"$eww_binary" -c "$eww_config" daemon --no-daemonize &
+eww_pid=$!
+
+ready=false
+for _attempt in $(seq 1 50); do
+	if "$eww_binary" -c "$eww_config" ping >/dev/null 2>&1; then
+		ready=true
+		break
+	fi
+	if ! kill -0 "$eww_pid" 2>/dev/null; then
+		break
+	fi
+	sleep 0.1
+done
+if [ "$ready" != true ]; then
+	printf 'hypringo-eww-session: Eww did not become ready\n' >&2
+	exit 1
+fi
+
+"$bar_manager" &
+bar_pid=$!
+
+while kill -0 "$eww_pid" 2>/dev/null &&
+	kill -0 "$bar_pid" 2>/dev/null; do
+	sleep 1
+done
+
+printf 'hypringo-eww-session: a managed process exited\n' >&2
+exit 1

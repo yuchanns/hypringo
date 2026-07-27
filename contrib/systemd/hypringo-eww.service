@@ -1,0 +1,19 @@
+[Unit]
+Description=Hypringo-managed Eww desktop session
+Documentation=https://github.com/yuchanns/hypringo
+PartOf=graphical-session.target
+Requires=hypringo.service
+After=graphical-session.target hypringo.service
+StartLimitIntervalSec=30
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/hypringo-eww-session
+Restart=on-failure
+RestartSec=1
+TimeoutStopSec=5
+KillMode=control-group
+
+[Install]
+WantedBy=graphical-session.target

@@ -28,9 +28,10 @@ local embedded_sources = {
 	"3rd/ltask/service/root.lua",
 	"3rd/ltask/service/timer.lua",
 	"src/lualib/config.lua",
-	"src/lualib/json.lua",
+	"src/lualib/hyprland.lua",
 	"src/lualib/runtime.lua",
 	"src/lualib/state.lua",
+	"src/service/hyprland.lua",
 	"src/service/main.lua",
 	"src/service/state.lua",
 }
@@ -74,10 +75,20 @@ lm:source_set "ltask_src" {
 	},
 }
 
+lm:source_set "yyjson_src" {
+	sources = {
+		"3rd/yyjson/src/yyjson.c",
+	},
+	includes = {
+		"3rd/yyjson/src",
+	},
+}
+
 lm:exe "hypringo" {
 	deps = {
 		"lua55_src",
 		"ltask_src",
+		"yyjson_src",
 	},
 	objdeps = {
 		"embedded_sources",
@@ -89,6 +100,7 @@ lm:exe "hypringo" {
 		"build",
 		"3rd/lua",
 		"3rd/ltask/src",
+		"3rd/yyjson/src",
 		"src",
 	},
 	gcc = {
@@ -96,6 +108,28 @@ lm:exe "hypringo" {
 			"dl",
 			"m",
 			"pthread",
+		},
+	},
+}
+
+lm:exe "unit" {
+	deps = {
+		"lua55_src",
+		"yyjson_src",
+	},
+	sources = {
+		"src/json.c",
+		"test/unit.c",
+	},
+	includes = {
+		"3rd/lua",
+		"3rd/yyjson/src",
+		"src",
+	},
+	gcc = {
+		links = {
+			"dl",
+			"m",
 		},
 	},
 }

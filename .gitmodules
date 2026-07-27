@@ -4,3 +4,6 @@
 [submodule "3rd/lua"]
 	path = 3rd/lua
 	url = https://github.com/lua/lua.git
+[submodule "3rd/yyjson"]
+	path = 3rd/yyjson
+	url = https://github.com/ibireme/yyjson.git

@@ -22,6 +22,7 @@
 struct control_client {
 	int fd;
 	bool subscribed;
+	bool eww_format;
 	char command[CONTROL_COMMAND_SIZE];
 	size_t command_size;
 };
@@ -37,6 +38,8 @@ struct control_server {
 	char *path;
 	char *snapshot;
 	size_t snapshot_size;
+	char *eww_snapshot;
+	size_t eww_snapshot_size;
 };
 
 static struct control_server server = {
@@ -90,25 +93,33 @@ write_all(int fd, const char *data, size_t size) {
 }
 
 static char *
-copy_snapshot(size_t *size) {
+copy_snapshot(bool eww_format, size_t *size) {
 	pthread_mutex_lock(&server.mutex);
-	*size = server.snapshot_size;
+	const char *snapshot = eww_format ? server.eww_snapshot : server.snapshot;
+	*size = eww_format ? server.eww_snapshot_size : server.snapshot_size;
 	char *result = malloc(*size);
 	if (result != NULL && *size > 0) {
-		memcpy(result, server.snapshot, *size);
+		memcpy(result, snapshot, *size);
 	}
 	pthread_mutex_unlock(&server.mutex);
 	return result;
 }
 
 static bool
-send_snapshot(int fd) {
+send_snapshot(int fd, bool eww_format) {
 	size_t size = 0;
-	char *snapshot = copy_snapshot(&size);
+	char *snapshot = copy_snapshot(eww_format, &size);
 	if (snapshot == NULL && size > 0) {
 		return false;
 	}
 	if (size == 0) {
+		if (eww_format) {
+			static const char empty_eww_snapshot[] = "{}\n";
+			return write_all(
+				fd,
+				empty_eww_snapshot,
+				sizeof(empty_eww_snapshot) - 1);
+		}
 		static const char empty_snapshot[] =
 			"{\"revision\":0,\"state\":{},\"type\":\"snapshot\"}\n";
 		return write_all(fd, empty_snapshot, sizeof(empty_snapshot) - 1);
@@ -128,7 +139,8 @@ remove_client(struct control_client *clients, size_t *count, size_t index) {
 static void
 broadcast_snapshot(struct control_client *clients, size_t *count) {
 	for (size_t index = 0; index < *count;) {
-		if (!clients[index].subscribed || send_snapshot(clients[index].fd)) {
+		if (!clients[index].subscribed ||
+			send_snapshot(clients[index].fd, clients[index].eww_format)) {
 			index++;
 		} else {
 			remove_client(clients, count, index);
@@ -144,14 +156,20 @@ handle_command(struct control_client *client, bool *close_client) {
 		return;
 	}
 	*newline = '\0';
-	if (strcmp(client->command, "status") == 0) {
-		send_snapshot(client->fd);
+	bool status = strcmp(client->command, "status") == 0;
+	bool subscribe = strcmp(client->command, "subscribe") == 0;
+	bool eww_status = strcmp(client->command, "status eww") == 0;
+	bool eww_subscribe = strcmp(client->command, "subscribe eww") == 0;
+	if (status || eww_status) {
+		client->eww_format = eww_status;
+		send_snapshot(client->fd, client->eww_format);
 		*close_client = true;
 		return;
 	}
-	if (strcmp(client->command, "subscribe") == 0) {
+	if (subscribe || eww_subscribe) {
+		client->eww_format = eww_subscribe;
 		client->subscribed = true;
-		if (!send_snapshot(client->fd)) {
+		if (!send_snapshot(client->fd, client->eww_format)) {
 			*close_client = true;
 		}
 		return;
@@ -297,7 +315,12 @@ connect_socket(const char *path) {
 	if (fd < 0) {
 		return -1;
 	}
-	set_cloexec(fd);
+	if (set_cloexec(fd) < 0) {
+		int configure_error = errno;
+		close(fd);
+		errno = configure_error;
+		return -1;
+	}
 	struct sockaddr_un address = { .sun_family = AF_UNIX };
 	if (strlen(path) >= sizeof(address.sun_path)) {
 		close(fd);
@@ -422,23 +445,33 @@ lstart(lua_State *L) {
 
 static int
 lpublish(lua_State *L) {
-	size_t size = 0;
-	const char *snapshot = luaL_checklstring(L, 1, &size);
-	char *copy = malloc(size);
-	if (copy == NULL) {
+	size_t snapshot_size = 0;
+	size_t eww_snapshot_size = 0;
+	const char *snapshot = luaL_checklstring(L, 1, &snapshot_size);
+	const char *eww_snapshot = luaL_checklstring(L, 2, &eww_snapshot_size);
+	char *snapshot_copy = malloc(snapshot_size);
+	char *eww_snapshot_copy = malloc(eww_snapshot_size);
+	if (snapshot_copy == NULL || eww_snapshot_copy == NULL) {
+		free(snapshot_copy);
+		free(eww_snapshot_copy);
 		return luaL_error(L, "cannot allocate control snapshot");
 	}
-	memcpy(copy, snapshot, size);
+	memcpy(snapshot_copy, snapshot, snapshot_size);
+	memcpy(eww_snapshot_copy, eww_snapshot, eww_snapshot_size);
 
 	pthread_mutex_lock(&server.mutex);
 	if (!server.running || server.stopping) {
 		pthread_mutex_unlock(&server.mutex);
-		free(copy);
+		free(snapshot_copy);
+		free(eww_snapshot_copy);
 		return luaL_error(L, "control server is not running");
 	}
 	free(server.snapshot);
-	server.snapshot = copy;
-	server.snapshot_size = size;
+	free(server.eww_snapshot);
+	server.snapshot = snapshot_copy;
+	server.snapshot_size = snapshot_size;
+	server.eww_snapshot = eww_snapshot_copy;
+	server.eww_snapshot_size = eww_snapshot_size;
 	int wake_write = server.wake_write;
 	pthread_mutex_unlock(&server.mutex);
 
@@ -472,6 +505,9 @@ lstop(lua_State *L) {
 	free(server.snapshot);
 	server.snapshot = NULL;
 	server.snapshot_size = 0;
+	free(server.eww_snapshot);
+	server.eww_snapshot = NULL;
+	server.eww_snapshot_size = 0;
 	close_fd(&server.listener);
 	close_fd(&server.wake_read);
 	close_fd(&server.wake_write);
@@ -487,7 +523,10 @@ static int
 lrequest(lua_State *L) {
 	const char *path = luaL_checkstring(L, 1);
 	const char *command = luaL_checkstring(L, 2);
-	if (strcmp(command, "status") != 0 && strcmp(command, "subscribe") != 0) {
+	if (strcmp(command, "status") != 0 &&
+		strcmp(command, "subscribe") != 0 &&
+		strcmp(command, "status eww") != 0 &&
+		strcmp(command, "subscribe eww") != 0) {
 		return luaL_error(L, "unsupported control command: %s", command);
 	}
 	int fd = connect_socket(path);

@@ -20,6 +20,47 @@ local function default_path()
 	return home .. "/.config/hypringo/config.lua"
 end
 
+local function default_hyprland_socket(name)
+	local runtime_dir = os.getenv "XDG_RUNTIME_DIR"
+	if not runtime_dir or runtime_dir == "" then
+		error("cannot resolve Hyprland " .. name .. " socket: XDG_RUNTIME_DIR is not set")
+	end
+	local signature = os.getenv "HYPRLAND_INSTANCE_SIGNATURE"
+	if not signature or signature == "" then
+		error("cannot resolve Hyprland " .. name .. " socket: HYPRLAND_INSTANCE_SIGNATURE is not set")
+	end
+	return runtime_dir .. "/hypr/" .. signature .. "/" .. name
+end
+
+local function require_table(parent, key, path)
+	local value = parent[key]
+	if value == nil then
+		value = {}
+		parent[key] = value
+	elseif type(value) ~= "table" then
+		error(("configuration field %s must be a table"):format(path))
+	end
+	return value
+end
+
+local function validate_absolute_path(value, path)
+	if type(value) ~= "string" or value == "" then
+		error(("configuration field %s must be a non-empty string"):format(path))
+	end
+	if value:sub(1, 1) ~= "/" then
+		error(("configuration field %s must be an absolute path"):format(path))
+	end
+	return value
+end
+
+local function validate_milliseconds(value, path, fallback)
+	value = value or fallback
+	if math.type(value) ~= "integer" or value < 10 or value > 60000 then
+		error(("configuration field %s must be an integer between 10 and 60000"):format(path))
+	end
+	return value
+end
+
 local function validate_value(value, path, visiting, validated)
 	local value_type = type(value)
 	if value_type == "nil" or value_type == "boolean" or value_type == "number" or value_type == "string" then
@@ -70,25 +111,46 @@ function M.load(path)
 		error(("configuration %s must return a table"):format(path))
 	end
 
-	if config.runtime == nil then
-		config.runtime = {}
-	elseif type(config.runtime) ~= "table" then
-		error "configuration field runtime must be a table"
-	end
+	local runtime = require_table(config, "runtime", "runtime")
 	local workers = config.runtime.workers or 2
 	if math.type(workers) ~= "integer" or workers < 1 or workers > 256 then
 		error "configuration field runtime.workers must be an integer between 1 and 256"
 	end
-	config.runtime.workers = workers
+	runtime.workers = workers
 
-	local socket_path = config.runtime.socket_path or default_socket_path()
-	if type(socket_path) ~= "string" or socket_path == "" then
-		error "configuration field runtime.socket_path must be a non-empty string"
+	runtime.socket_path = validate_absolute_path(
+		runtime.socket_path or default_socket_path(),
+		"runtime.socket_path")
+
+	local sources = require_table(config, "sources", "sources")
+	local hyprland = require_table(sources, "hyprland", "sources.hyprland")
+	if hyprland.enabled == nil then
+		hyprland.enabled = false
+	elseif type(hyprland.enabled) ~= "boolean" then
+		error "configuration field sources.hyprland.enabled must be a boolean"
 	end
-	if socket_path:sub(1, 1) ~= "/" then
-		error "configuration field runtime.socket_path must be an absolute path"
+	hyprland.reconnect_min_ms = validate_milliseconds(
+		hyprland.reconnect_min_ms,
+		"sources.hyprland.reconnect_min_ms",
+		100)
+	hyprland.reconnect_max_ms = validate_milliseconds(
+		hyprland.reconnect_max_ms,
+		"sources.hyprland.reconnect_max_ms",
+		5000)
+	if hyprland.reconnect_max_ms < hyprland.reconnect_min_ms then
+		error "configuration field sources.hyprland.reconnect_max_ms must not be less than reconnect_min_ms"
 	end
-	config.runtime.socket_path = socket_path
+	if hyprland.enabled then
+		hyprland.command_socket = validate_absolute_path(
+			hyprland.command_socket or default_hyprland_socket ".socket.sock",
+			"sources.hyprland.command_socket")
+		hyprland.event_socket = validate_absolute_path(
+			hyprland.event_socket or default_hyprland_socket ".socket2.sock",
+			"sources.hyprland.event_socket")
+		if hyprland.command_socket == hyprland.event_socket then
+			error "configuration fields sources.hyprland.command_socket and event_socket must differ"
+		end
+	end
 
 	validate_value(config, "configuration", {}, {})
 	return config

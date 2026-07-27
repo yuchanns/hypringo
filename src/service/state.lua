@@ -13,7 +13,8 @@ local function publish()
 		state = snapshot.state,
 		type = "snapshot",
 	} .. "\n"
-	control.publish(payload)
+	local eww_payload = json.encode(snapshot.state) .. "\n"
+	control.publish(payload, eww_payload)
 end
 
 control.start(config.runtime.socket_path)

@@ -1,3 +1,5 @@
+local json = require "hypringo.json"
+
 local M = {}
 
 local domains = {
@@ -15,7 +17,7 @@ local function copy(value, visiting)
 		error "state values must not contain cycles"
 	end
 	visiting[value] = true
-	local result = {}
+	local result = json.is_array(value) and json.array() or {}
 	for key, child in pairs(value) do
 		result[copy(key, visiting)] = copy(child, visiting)
 	end
@@ -28,6 +30,9 @@ local function equal(left, right, compared)
 		return true
 	end
 	if type(left) ~= "table" or type(right) ~= "table" then
+		return false
+	end
+	if json.is_array(left) ~= json.is_array(right) then
 		return false
 	end
 	compared[left] = compared[left] or {}
@@ -59,12 +64,29 @@ function M.new(config_path, config)
 			},
 			hyprland = {
 				active_window = {
+					address = "",
 					class = "",
+					floating = false,
+					fullscreen = 0,
+					initial_class = "",
+					initial_title = "",
+					pid = 0,
 					title = "",
+					workspace = {
+						id = 0,
+						name = "",
+					},
+					xwayland = false,
 				},
-				active_workspace = 0,
+				active_workspace = {
+					id = 0,
+					monitor = "",
+					name = "",
+				},
 				available = false,
-				monitors = {},
+				error = "",
+				monitors = json.array(),
+				workspaces = json.array(),
 			},
 			media = {
 				artist = "",

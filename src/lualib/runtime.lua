@@ -86,6 +86,7 @@ end
 
 local function build_service_loader()
 	local service_names = {
+		"hyprland",
 		"logger",
 		"main",
 		"root",
@@ -101,7 +102,7 @@ local function build_service_loader()
 	lines[#lines + 1] = "}"
 	lines[#lines + 1] = "local modules = {"
 	for _, name in ipairs {
-		"hypringo.json",
+		"hypringo.hyprland",
 		"hypringo.state",
 	} do
 		lines[#lines + 1] = ("[%q] = %q,"):format(name, embed.get(name))
@@ -128,32 +129,43 @@ local function start(config_path, config)
 	local host = require "hypringo.host"
 	local bootstrap = load_embedded("ltask.bootstrap", "@3rd/ltask/lualib/bootstrap.lua")
 	local service_loader = build_service_loader()
-	local root_config = {
-		bootstrap = {
-			{
-				name = "timer",
-				unique = true,
-			},
-			{
-				name = "logger",
-				unique = true,
-			},
-			{
-				name = "state",
-				unique = true,
-				args = {
-					config_path,
-					config,
-				},
-			},
-			{
-				name = "main",
-				args = {
-					config_path,
-					config,
-				},
+	local bootstrap_services = {
+		{
+			name = "timer",
+			unique = true,
+		},
+		{
+			name = "logger",
+			unique = true,
+		},
+		{
+			name = "state",
+			unique = true,
+			args = {
+				config_path,
+				config,
 			},
 		},
+	}
+	if config.sources.hyprland.enabled then
+		bootstrap_services[#bootstrap_services + 1] = {
+			name = "hyprland",
+			unique = true,
+			args = {
+				config,
+			},
+		}
+	end
+	bootstrap_services[#bootstrap_services + 1] = {
+		name = "main",
+		args = {
+			config_path,
+			config,
+		},
+	}
+
+	local root_config = {
+		bootstrap = bootstrap_services,
 		service_source = embed.get "ltask.service",
 		service_chunkname = "@3rd/ltask/lualib/service.lua",
 		initfunc = service_loader,
@@ -181,7 +193,11 @@ local function run_client(options)
 	if socket_path:sub(1, 1) ~= "/" then
 		error "control socket path must be absolute"
 	end
-	control.request(socket_path, options.command)
+	local command = options.command
+	if options.format == "eww" then
+		command = command .. " eww"
+	end
+	control.request(socket_path, command)
 end
 
 local options = parse_arguments(...)

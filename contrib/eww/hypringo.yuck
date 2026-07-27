@@ -1,0 +1,5 @@
+;; Import this listener from the active Eww configuration. It receives one
+;; complete state object immediately and another complete object per revision.
+(deflisten hypringo
+  :initial "{\"audio\":{\"available\":false,\"muted\":false,\"volume\":0},\"hyprland\":{\"active_window\":{\"title\":\"\"},\"active_workspace\":{\"id\":0,\"monitor\":\"\",\"name\":\"\"},\"available\":false,\"error\":\"\",\"monitors\":[],\"workspaces\":[]},\"media\":{\"available\":false,\"status\":\"stopped\"},\"runtime\":{\"ready\":false}}"
+  `hypringo subscribe --format eww`)

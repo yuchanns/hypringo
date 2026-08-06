@@ -120,10 +120,26 @@ fi
 
 grep -Fq 'ExecStartPre=%h/.local/bin/hypringo --check-config' \
 	contrib/systemd/hypringo.service
+grep -Fq 'ExecStartPre=/usr/bin/sleep 10' \
+	contrib/systemd/hypringo.service
+grep -Fq 'ExecStartPre=%h/.local/bin/hypringo-hyprland-ready' \
+	contrib/systemd/hypringo.service
 grep -Fq 'ExecReload=%h/.local/bin/hypringo reload' \
 	contrib/systemd/hypringo.service
+grep -Fq 'RestartSec=15' contrib/systemd/hypringo.service
+grep -Fq 'StartLimitIntervalSec=0' contrib/systemd/hypringo.service
 grep -Fq 'WantedBy=graphical-session.target' \
 	contrib/systemd/hypringo.service
+grep -Fq 'Wants=hypringo.service' contrib/systemd/hypringo-eww.service
+if grep -Fq 'Requires=hypringo.service' contrib/systemd/hypringo-eww.service; then
+	echo "Eww service must not hard-require Hypringo" >&2
+	exit 1
+fi
+HYPRCTL_BIN=true contrib/systemd/hypringo-hyprland-ready
+if HYPRCTL_BIN=false contrib/systemd/hypringo-hyprland-ready; then
+	echo "Hyprland readiness helper accepted a failed probe" >&2
+	exit 1
+fi
 
 kill -TERM "$daemon_pid"
 wait "$daemon_pid" 2>/dev/null || true

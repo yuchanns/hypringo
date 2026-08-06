@@ -6,7 +6,7 @@ systemctl --user import-environment \
 	WAYLAND_DISPLAY \
 	XDG_CURRENT_DESKTOP \
 	XDG_SESSION_TYPE
-systemctl --user start hypringo.service
+systemctl --user --no-block start hypringo.service
 
 if ! pgrep -x swww-daemon >/dev/null 2>&1; then
 	swww-daemon >/dev/null 2>&1 &
@@ -42,4 +42,4 @@ hyprctl -j monitors |
 		esac
 	done
 
-systemctl --user start hypringo-eww.service
+systemctl --user --no-block start hypringo-eww.service

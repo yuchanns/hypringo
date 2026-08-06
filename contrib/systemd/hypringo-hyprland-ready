@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+hyprctl_binary=${HYPRCTL_BIN:-hyprctl}
+if ! command -v "$hyprctl_binary" >/dev/null 2>&1; then
+	printf 'hypringo: hyprctl is unavailable; retrying service start later\n' >&2
+	exit 1
+fi
+
+if ! "$hyprctl_binary" -j monitors >/dev/null 2>&1; then
+	printf 'hypringo: Hyprland control socket is not ready; retrying service start later\n' >&2
+	exit 1
+fi

@@ -179,6 +179,7 @@ uses monitor names as stable identities; the Eww configuration should define a
 ## systemd user service
 
 ```bash
+install -Dm755 contrib/systemd/hypringo-hyprland-ready ~/.local/bin/hypringo-hyprland-ready
 install -Dm644 contrib/systemd/hypringo.service ~/.config/systemd/user/hypringo.service
 systemctl --user import-environment \
 	WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE XDG_CURRENT_DESKTOP XDG_SESSION_TYPE
@@ -188,7 +189,10 @@ systemctl --user enable --now hypringo.service hypringo-eww.service
 
 The Hyprland environment must be visible to the user manager.
 `contrib/hyprland/hypringo-session` can import the environment and start the
-services after the Hyprland session is ready.
+services without blocking the session hook. The units delay startup until
+Hyprland and the Hypringo control socket are ready. An unavailable prerequisite
+causes that unit's next scheduled restart; Eww is intentionally independent of
+the core service so one failed component does not cascade into the other.
 
 Useful diagnostics:
 

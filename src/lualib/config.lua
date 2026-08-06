@@ -20,6 +20,18 @@ local function default_path()
 	return home .. "/.config/hypringo/config.lua"
 end
 
+local function default_session_path()
+	local state_home = os.getenv "XDG_STATE_HOME"
+	if state_home and state_home ~= "" then
+		return state_home .. "/hypringo/session.json"
+	end
+	local home = os.getenv "HOME"
+	if not home or home == "" then
+		error "cannot resolve session path: HOME is not set"
+	end
+	return home .. "/.local/state/hypringo/session.json"
+end
+
 local function default_hyprland_socket(name)
 	local runtime_dir = os.getenv "XDG_RUNTIME_DIR"
 	if not runtime_dir or runtime_dir == "" then
@@ -222,6 +234,28 @@ function M.load(path)
 		end
 	end
 
+	local session = require_table(config, "session", "session")
+	if session.enabled == nil then
+		session.enabled = hyprland.enabled
+	elseif type(session.enabled) ~= "boolean" then
+		error "configuration field session.enabled must be a boolean"
+	end
+	session.path = validate_absolute_path(
+		session.path or default_session_path(),
+		"session.path")
+	session.debounce_ms = validate_milliseconds(
+		session.debounce_ms,
+		"session.debounce_ms",
+		500)
+	if session.restore == nil then
+		session.restore = true
+	elseif type(session.restore) ~= "boolean" then
+		error "configuration field session.restore must be a boolean"
+	end
+	if session.enabled and not hyprland.enabled then
+		error "configuration field session.enabled requires sources.hyprland.enabled"
+	end
+
 	local mpris = require_table(sources, "mpris", "sources.mpris")
 	if mpris.enabled == nil then
 		mpris.enabled = false
@@ -352,6 +386,16 @@ function M.reloadable(current, candidate)
 			("sources.%s.enabled"):format(source_name),
 		}
 	end
+	immutable[#immutable + 1] = {
+		current.session.enabled,
+		candidate.session.enabled,
+		"session.enabled",
+	}
+	immutable[#immutable + 1] = {
+		current.session.path,
+		candidate.session.path,
+		"session.path",
+	}
 	if current.sources.hyprland.enabled and
 		candidate.sources.hyprland.enabled then
 		for _, field in ipairs { "command_socket", "event_socket" } do

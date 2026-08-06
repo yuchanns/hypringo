@@ -16,6 +16,9 @@ case "$request" in
 	j/workspaces)
 		exec cat "$FAKE_HYPRLAND_DIR/workspaces.json"
 		;;
+	j/clients)
+		exec cat "$FAKE_HYPRLAND_DIR/clients.json"
+		;;
 	*)
 		echo "unsupported request: $request" >&2
 		exit 1

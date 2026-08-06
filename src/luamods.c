@@ -3,6 +3,7 @@
 #include "audio.h"
 #include "control.h"
 #include "devices.h"
+#include "fs.h"
 #include "http.h"
 #include "ipc.h"
 #include "json.h"
@@ -25,6 +26,7 @@ hypringo_openlibs(lua_State *L) {
 	preload(L, "hypringo.audio", luaopen_hypringo_audio);
 	preload(L, "hypringo.control", luaopen_hypringo_control);
 	preload(L, "hypringo.system", luaopen_hypringo_system);
+	preload(L, "hypringo.fs", luaopen_hypringo_fs);
 	preload(L, "hypringo.http", luaopen_hypringo_http);
 	preload(L, "hypringo.ipc", luaopen_hypringo_ipc);
 	preload(L, "hypringo.json", luaopen_hypringo_json);

@@ -1,4 +1,5 @@
 #include "json.h"
+#include "fs.h"
 
 #include <lauxlib.h>
 #include <lualib.h>
@@ -18,6 +19,8 @@ main(int argc, char **argv) {
 	}
 	luaL_openlibs(L);
 	luaL_requiref(L, "hypringo.json", luaopen_hypringo_json, 0);
+	lua_pop(L, 1);
+	luaL_requiref(L, "hypringo.fs", luaopen_hypringo_fs, 0);
 	lua_pop(L, 1);
 	int status = luaL_dofile(L, argv[1]);
 	if (status != LUA_OK) {

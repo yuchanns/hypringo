@@ -64,10 +64,17 @@ function S.reload()
 		"github",
 		"hyprland",
 		"mpris",
+		"session",
 		"system",
 		"weather",
 	} do
-		if candidate.sources[source_name].enabled then
+		local enabled
+		if source_name == "session" then
+			enabled = candidate.session.enabled
+		else
+			enabled = candidate.sources[source_name].enabled
+		end
+		if enabled then
 			local service = ltask.queryservice(source_name)
 			local called, reloaded, reload_error =
 				pcall(ltask.call, service, "reload", candidate)

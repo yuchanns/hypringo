@@ -1,8 +1,10 @@
 local json = require "hypringo.json"
+local fs = require "hypringo.fs"
 local actions = assert(loadfile("src/lualib/actions.lua", "t"))()
 local doctor = assert(loadfile("src/lualib/doctor.lua", "t"))()
 local hyprland = assert(loadfile("src/lualib/hyprland.lua", "t"))()
 local remote = assert(loadfile("src/lualib/remote.lua", "t"))()
+local session = assert(loadfile("src/lualib/session.lua", "t"))()
 local state = assert(loadfile("src/lualib/state.lua", "t"))()
 local config_module = assert(loadfile("src/lualib/config.lua", "t"))()
 
@@ -68,6 +70,12 @@ action = assert(actions.parse(action_command))
 assert_equal(action.domain, "brightness")
 assert_equal(action.name, "set-brightness")
 assert_equal(action.value, 75)
+action_command, action_error = actions.from_cli { "session", "save" }
+assert_equal(action_error, nil)
+assert_equal(action_command, "dispatch session save")
+action = assert(actions.parse(action_command))
+assert_equal(action.domain, "session")
+assert_equal(action.name, "save")
 action_command, action_error =
 	actions.from_cli { "brightness", "set", "101" }
 assert_equal(action_command, nil)
@@ -111,6 +119,9 @@ assert_equal(config.sources.github.enabled, false)
 assert_equal(config.sources.system.enabled, true)
 assert_equal(config.sources.system.interval_ms, 5000)
 assert_equal(config.sources.system.sysfs_root, "/sys")
+assert_equal(config.session.enabled, false)
+assert(config.session.path:match "/hypringo/session%.json$")
+assert_equal(config.session.restore, true)
 assert_equal(config.sources.weather.enabled, false)
 
 local hyprland_config = config_module.load "test/config-hyprland.lua"
@@ -143,6 +154,17 @@ local reloadable, reload_error =
 	config_module.reloadable(reload_current, reload_candidate)
 assert_equal(reloadable, true)
 assert_equal(reload_error, nil)
+reload_candidate.session.debounce_ms = 1000
+reloadable, reload_error =
+	config_module.reloadable(reload_current, reload_candidate)
+assert_equal(reloadable, true)
+assert_equal(reload_error, nil)
+reload_candidate.session.path = "/tmp/another-hypringo-session.json"
+reloadable, reload_error =
+	config_module.reloadable(reload_current, reload_candidate)
+assert_equal(reloadable, false)
+assert(reload_error:match "session%.path")
+reload_candidate.session.path = reload_current.session.path
 reload_candidate.runtime.workers = 5
 reloadable, reload_error =
 	config_module.reloadable(reload_current, reload_candidate)
@@ -187,6 +209,8 @@ assert_equal(snapshot.state.system.brightness.available, false)
 assert_equal(snapshot.state.hyprland.active_workspace.id, 0)
 assert_equal(snapshot.state.hyprland.available, false)
 assert_equal(#snapshot.state.hyprland.workspaces, 0)
+assert_equal(#snapshot.state.hyprland.clients, 0)
+assert_equal(json.is_array(snapshot.state.hyprland.clients), true)
 assert_equal(json.is_array(snapshot.state.hyprland.workspaces), true)
 assert_equal(json.encode(snapshot.state.hyprland.workspaces), "[]")
 
@@ -415,12 +439,123 @@ local hyprland_snapshot = hyprland.snapshot(
 			name = "2",
 		},
 		xwayland = false,
+	},
+	{
+		{
+			address = "0x123",
+			class = "example",
+			floating = false,
+			fullscreen = 0,
+			pid = 42,
+			title = "Title, with comma",
+			workspace = {
+				id = 2,
+				name = "2",
+			},
+			xwayland = false,
+		},
+		{
+			address = "0x456",
+			class = "unsupported",
+			initialClass = "unsupported",
+			pid = 0,
+			title = "Unsupported",
+			workspace = {
+				id = 2,
+				name = "2",
+			},
+		},
 	})
 assert_equal(hyprland_snapshot.available, true)
 assert_equal(hyprland_snapshot.active_workspace.monitor, "OUTPUT-A")
 assert_equal(hyprland_snapshot.active_workspace.id, 2)
 assert_equal(hyprland_snapshot.active_window.title, "Title, with comma")
 assert_equal(hyprland_snapshot.workspaces[1].monitor_id, 7)
+assert_equal(#hyprland_snapshot.clients, 2)
+assert_equal(hyprland_snapshot.clients[1].monitor_name, "OUTPUT-A")
+
+local function process_reader(pid)
+	if pid == 42 then
+		return {
+			argv = json.array { "example", "--profile", "default" },
+			cwd = "/tmp",
+			exe = "/usr/bin/example",
+			parent_pid = 1,
+		}
+	end
+	if pid == 43 then
+		return {
+			argv = json.array { "example", "--token", "secret-value" },
+			cwd = "/tmp",
+			exe = "/usr/bin/example",
+			parent_pid = 1,
+		}
+	end
+	return nil, "process metadata is unavailable"
+end
+
+local saved_session = assert(session.capture(
+	hyprland_snapshot,
+	process_reader,
+	123456))
+assert_equal(saved_session.format, "hypringo-session")
+assert_equal(saved_session.version, 1)
+assert_equal(#saved_session.clients, 2)
+local saved_automatic
+local saved_skipped
+for _, client in ipairs(saved_session.clients) do
+	if client.restore == "automatic" then
+		saved_automatic = client
+	else
+		saved_skipped = client
+	end
+end
+assert(saved_automatic)
+assert(saved_skipped)
+assert_equal(saved_automatic.application.executable, "/usr/bin/example")
+assert_equal(saved_skipped.reason, "client process id is unavailable")
+local saved_json = json.encode(saved_session)
+assert(saved_json:find('"address"') == nil)
+assert(saved_json:find('"pid"') == nil)
+local restore_plan = assert(session.plan_restore(saved_session, {
+	clients = json.array(),
+}))
+assert_equal(#restore_plan.applications, 1)
+assert_equal(restore_plan.applications[1].executable, "/usr/bin/example")
+assert_equal(#restore_plan.skipped, 1)
+
+local redacted_snapshot = hyprland.snapshot({}, {}, {}, {
+	{
+		class = "secret-app",
+		initialClass = "secret-app",
+		pid = 43,
+		workspace = {
+			id = 1,
+			name = "1",
+		},
+	},
+})
+local redacted_session = assert(session.capture(
+	redacted_snapshot,
+	process_reader,
+	123456))
+assert_equal(redacted_session.clients[1].restore, "skipped")
+assert(json.encode(redacted_session):find("secret%-value") == nil)
+
+local session_root = os.tmpname()
+assert(os.remove(session_root))
+local session_nested = session_root .. "/nested"
+local session_path = session_nested .. "/session.json"
+assert(fs.atomic_write(session_path, "first"))
+local session_data = assert(fs.read(session_path))
+assert_equal(session_data, "first")
+assert(fs.atomic_write(session_path, "second"))
+assert_equal(assert(fs.read(session_path)), "second")
+assert_equal(assert(fs.read(session_path .. ".bak")), "first")
+assert(os.remove(session_path))
+assert(os.remove(session_path .. ".bak"))
+assert(os.remove(session_nested))
+assert(os.remove(session_root))
 
 local remainder, relevant, event_count =
 	hyprland.consume_events("", "activewindow>>example,Title")

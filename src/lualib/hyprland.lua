@@ -53,6 +53,13 @@ local function boolean_or(value, fallback)
 	return value_or(value, fallback, "boolean")
 end
 
+local function pair_number_or(value, index, fallback)
+	if type(value) ~= "table" or value == json.null then
+		return fallback
+	end
+	return number_or(value[index], fallback)
+end
+
 local function table_or_empty(value)
 	if type(value) ~= "table" or value == json.null then
 		return {}
@@ -117,6 +124,30 @@ local function normalize_active_window(window)
 	}
 end
 
+local function normalize_client(client)
+	local workspace = normalize_workspace_reference(client.workspace)
+	return {
+		address = string_or(client.address, ""),
+		class = string_or(client.class, ""),
+		floating = boolean_or(client.floating, false),
+		fullscreen = number_or(client.fullscreen, 0),
+		height = pair_number_or(client.size, 2, 0),
+		hidden = boolean_or(client.hidden, false),
+		initial_class = string_or(client.initialClass, ""),
+		initial_title = string_or(client.initialTitle, ""),
+		mapped = boolean_or(client.mapped, true),
+		monitor_id = number_or(client.monitor, -1),
+		monitor_name = "",
+		pid = number_or(client.pid, 0),
+		title = string_or(client.title, ""),
+		width = pair_number_or(client.size, 1, 0),
+		workspace = workspace,
+		x = pair_number_or(client.at, 1, 0),
+		xwayland = boolean_or(client.xwayland, false),
+		y = pair_number_or(client.at, 2, 0),
+	}
+end
+
 local function sorted_array(source, normalize, compare)
 	local result = json.array()
 	for _, item in ipairs(table_or_empty(source)) do
@@ -145,8 +176,25 @@ local function compare_workspaces(left, right)
 	return left.name < right.name
 end
 
-function M.snapshot(monitors, workspaces, active_window)
+local function compare_clients(left, right)
+	if left.workspace.id ~= right.workspace.id then
+		return left.workspace.id < right.workspace.id
+	end
+	return left.address < right.address
+end
+
+function M.snapshot(monitors, workspaces, active_window, clients)
 	local normalized_monitors = sorted_array(monitors, normalize_monitor, compare_monitors)
+	local normalized_workspaces = sorted_array(workspaces, normalize_workspace, compare_workspaces)
+	local workspace_monitors = {}
+	for _, workspace in ipairs(normalized_workspaces) do
+		workspace_monitors[workspace.id .. "\0" .. workspace.name] = workspace.monitor
+	end
+	local normalized_clients = sorted_array(clients, normalize_client, compare_clients)
+	for _, client in ipairs(normalized_clients) do
+		client.monitor_name = workspace_monitors[
+			client.workspace.id .. "\0" .. client.workspace.name] or ""
+	end
 	local active_workspace = {
 		id = 0,
 		monitor = "",
@@ -170,9 +218,10 @@ function M.snapshot(monitors, workspaces, active_window)
 		capabilities = {
 			switch_workspace = true,
 		},
+		clients = normalized_clients,
 		error = "",
 		monitors = normalized_monitors,
-		workspaces = sorted_array(workspaces, normalize_workspace, compare_workspaces),
+		workspaces = normalized_workspaces,
 	}
 end
 
@@ -188,6 +237,7 @@ function M.unavailable(message)
 		capabilities = {
 			switch_workspace = true,
 		},
+		clients = json.array(),
 		error = message or "",
 		monitors = json.array(),
 		workspaces = json.array(),

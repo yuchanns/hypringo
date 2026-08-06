@@ -14,6 +14,9 @@ event_socket="$runtime_dir/event.sock"
 event_pipe="$runtime_dir/event.pipe"
 control_socket="$runtime_dir/hypringo.sock"
 config_path="$runtime_dir/config.lua"
+session_path="$runtime_dir/session.json"
+session_marker="$runtime_dir/session-marker"
+session_helper="$(pwd)/test/session-helper.sh"
 daemon_log="$runtime_dir/hypringo.log"
 command_log="$runtime_dir/command.log"
 command_request_log="$runtime_dir/command-requests.log"
@@ -46,11 +49,20 @@ JSON
 cat >"$fake_dir/activewindow.json" <<'JSON'
 {"address":"0x123","class":"example","title":"Initial, title","workspace":{"id":2,"name":"2"},"floating":false,"fullscreen":0,"pid":42,"xwayland":false}
 JSON
+cat >"$fake_dir/clients.json" <<'JSON'
+[{"address":"0x123","class":"example","initialClass":"example","initialTitle":"Initial, title","title":"Initial, title","workspace":{"id":2,"name":"2"},"floating":false,"fullscreen":0,"pid":42,"at":[0,0],"size":[1200,800],"monitor":7,"mapped":true,"hidden":false,"xwayland":false}]
+JSON
 cat >"$config_path" <<EOF
 return {
 	runtime = {
 		socket_path = "$control_socket",
 		workers = 2,
+	},
+	session = {
+		enabled = true,
+		path = "$session_path",
+		restore = true,
+		debounce_ms = 20,
 	},
 	sources = {
 		hyprland = {
@@ -62,6 +74,10 @@ return {
 		},
 	},
 }
+EOF
+
+cat >"$session_path" <<EOF
+{"captured_at":1,"clients":[{"application":{"argv":["$session_helper","restored"],"cwd":"$(pwd)/test","executable":"$session_helper","initial_class":"restorable-test"},"reason":"","restore":"automatic","window":{"class":"restorable-test","floating":false,"fullscreen":0,"height":800,"initial_class":"restorable-test","initial_title":"","title":"Restored test application","width":1200,"workspace":{"monitor":"FAKE-1","name":"2"},"x":0,"y":0}}],"format":"hypringo-session","monitors":[],"skipped":[],"version":1,"workspaces":[]}
 EOF
 
 start_command_server() {
@@ -135,7 +151,8 @@ assert_contains() {
 
 start_command_server
 start_event_server
-XDG_RUNTIME_DIR="$runtime_dir" "$binary" --config "$config_path" >>"$daemon_log" 2>&1 &
+HYPRINGO_SESSION_TEST_MARKER="$session_marker" \
+	XDG_RUNTIME_DIR="$runtime_dir" "$binary" --config "$config_path" >>"$daemon_log" 2>&1 &
 daemon_pid=$!
 exec 3>"$event_pipe"
 
@@ -144,6 +161,7 @@ initial=$(wait_for_status '"available":true')
 assert_contains "$initial" '"monitor":"FAKE-1"' "initial Hyprland snapshot is incomplete"
 assert_contains "$initial" '"monitor_id":7' "initial Hyprland snapshot is incomplete"
 assert_contains "$initial" '"title":"Initial, title"' "initial Hyprland snapshot is incomplete"
+assert_contains "$initial" '"address":"0x123"' "Hyprland clients were not captured"
 doctor=$("$binary" doctor --socket "$control_socket")
 assert_contains "$doctor" '"healthy":true' "connected Hyprland doctor state was unhealthy"
 assert_contains "$doctor" '"switch_workspace":true' "Hyprland capability was not published"
@@ -155,6 +173,36 @@ case "$eww_initial" in
 		exit 1
 		;;
 esac
+
+count=0
+while ! grep -q '"restore":"skipped"' "$session_path" 2>/dev/null; do
+	if ! kill -0 "$daemon_pid" 2>/dev/null; then
+		cat "$daemon_log" >&2
+		exit 1
+	fi
+	count=$((count + 1))
+	if [ "$count" -ge 400 ]; then
+		echo "automatic session snapshot was not refreshed" >&2
+		exit 1
+	fi
+	sleep 0.01
+done
+session_snapshot=$(cat "$session_path")
+assert_contains "$session_snapshot" '"format":"hypringo-session"' "automatic session snapshot has the wrong format"
+assert_contains "$session_snapshot" '"restore":"skipped"' "unsupported process was not marked skipped"
+count=0
+while [ ! -f "$session_marker" ]; do
+	if ! kill -0 "$daemon_pid" 2>/dev/null; then
+		cat "$daemon_log" >&2
+		exit 1
+	fi
+	count=$((count + 1))
+	if [ "$count" -ge 100 ]; then
+		echo "automatic session restore did not launch the supported test application" >&2
+		exit 1
+	fi
+	sleep 0.01
+done
 
 dispatch_result=$(
 	"$binary" dispatch workspace switch 8 --socket "$control_socket"

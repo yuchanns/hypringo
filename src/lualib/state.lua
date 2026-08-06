@@ -19,6 +19,7 @@ local array_fields = {
 	hyprland = {
 		monitors = true,
 		workspaces = true,
+		clients = true,
 	},
 }
 
@@ -109,6 +110,7 @@ function M.new(config_path, config)
 					switch_workspace = config.sources.hyprland.enabled,
 				},
 				error = "",
+				clients = json.array(),
 				monitors = json.array(),
 				workspaces = json.array(),
 			},

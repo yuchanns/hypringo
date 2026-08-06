@@ -23,6 +23,7 @@ Commands:
   status              Print the current revisioned state and exit.
   subscribe           Stream revisioned state snapshots as JSON lines.
   dispatch            Send a typed workspace, media, audio, or brightness action.
+  session             Save or restore the automatic Hyprland session snapshot.
 ]]
 end
 
@@ -33,7 +34,7 @@ local function parse_arguments(args)
 	}
 	if args[1] == "doctor" or args[1] == "reload" or
 		args[1] == "status" or args[1] == "subscribe" or
-		args[1] == "dispatch" then
+		args[1] == "dispatch" or args[1] == "session" then
 		options.command = args[1]
 		table.remove(args, 1)
 	end
@@ -71,12 +72,12 @@ local function parse_arguments(args)
 			options.format = args[index]
 		elseif argument == "--help" then
 			options.help = true
-		elseif options.command == "dispatch" and
+		elseif (options.command == "dispatch" or options.command == "session") and
 			argument:match "^%-?%d+$" then
 			options.action_args[#options.action_args + 1] = argument
 		elseif argument:sub(1, 1) == "-" then
 			error("unknown option: " .. argument)
-		elseif options.command == "dispatch" then
+		elseif options.command == "dispatch" or options.command == "session" then
 			options.action_args[#options.action_args + 1] = argument
 		elseif options.command then
 			error("unexpected argument for " .. options.command .. ": " .. argument)
@@ -93,7 +94,7 @@ local function parse_arguments(args)
 	if options.socket_path and not options.command then
 		error "--socket can only be used with a client command"
 	end
-	if options.command == "dispatch" then
+	if options.command == "dispatch" or options.command == "session" then
 		local command, action_error = actions_module.from_cli(options.action_args)
 		if not command then
 			error(action_error)
@@ -113,6 +114,7 @@ local function build_service_loader()
 		"main",
 		"mpris",
 		"root",
+		"session",
 		"state",
 		"system",
 		"timer",
@@ -132,6 +134,7 @@ local function build_service_loader()
 		"hypringo.doctor",
 		"hypringo.hyprland",
 		"hypringo.remote",
+		"hypringo.session",
 		"hypringo.state",
 	} do
 		lines[#lines + 1] = ("[%q] = %q,"):format(name, embed.get(name))
@@ -186,6 +189,15 @@ local function start(config_path, config)
 		}
 	end
 	if config.sources.hyprland.enabled then
+		if config.session.enabled then
+			bootstrap_services[#bootstrap_services + 1] = {
+				name = "session",
+				unique = true,
+				args = {
+					config,
+				},
+			}
+		end
 		bootstrap_services[#bootstrap_services + 1] = {
 			name = "hyprland",
 			unique = true,

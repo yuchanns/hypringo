@@ -33,6 +33,7 @@ local embedded_sources = {
 	"src/lualib/hyprland.lua",
 	"src/lualib/remote.lua",
 	"src/lualib/runtime.lua",
+	"src/lualib/session.lua",
 	"src/lualib/state.lua",
 	"src/service/audio.lua",
 	"src/service/github.lua",
@@ -42,6 +43,7 @@ local embedded_sources = {
 	"src/service/main.lua",
 	"src/service/state.lua",
 	"src/service/system.lua",
+	"src/service/session.lua",
 	"src/service/weather.lua",
 }
 
@@ -130,6 +132,7 @@ lm:exe "unit" {
 		"yyjson_src",
 	},
 	sources = {
+		"src/fs.c",
 		"src/json.c",
 		"test/unit.c",
 	},

@@ -47,6 +47,14 @@ local function dispatch(command)
 		call_service("hyprland", action)
 		return
 	end
+	if action.domain == "session" then
+		if not config.session.enabled then
+			ltask.log.error "session action requires the session manager"
+			return
+		end
+		call_service("session", action)
+		return
+	end
 	if action.domain == "media" then
 		if not config.sources.mpris.enabled then
 			ltask.log.error "media dispatch requires the MPRIS source"

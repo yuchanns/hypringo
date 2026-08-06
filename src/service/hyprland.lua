@@ -6,6 +6,7 @@ local json = require "hypringo.json"
 local config = ...
 local source_config = config.sources.hyprland
 local state_service = ltask.queryservice "state"
+local session_service = config.session.enabled and ltask.queryservice "session" or nil
 local wait_message, wake_fd = ltask.eventinit()
 
 local event_buffer = ""
@@ -14,7 +15,11 @@ local reconnect_ms = source_config.reconnect_min_ms
 local stopping = false
 
 local function publish_unavailable(message)
-	ltask.send(state_service, "merge", "hyprland", hyprland.unavailable(message))
+	local snapshot = hyprland.unavailable(message)
+	ltask.send(state_service, "merge", "hyprland", snapshot)
+	if session_service then
+		ltask.send(session_service, "observe", snapshot)
+	end
 end
 
 local function decode_response(command)
@@ -45,11 +50,20 @@ local function resync()
 	if not active_window then
 		return nil, window_error
 	end
+	local clients = decode_response "j/clients"
+	if not clients then
+		clients = {}
+		ltask.log.info "Hyprland j/clients is unavailable; automatic session capture is disabled for this snapshot"
+	end
+	local snapshot = hyprland.snapshot(monitors, workspaces, active_window, clients)
 	ltask.send(
 		state_service,
 		"merge",
 		"hyprland",
-		hyprland.snapshot(monitors, workspaces, active_window))
+		snapshot)
+	if session_service then
+		ltask.send(session_service, "observe", snapshot)
+	end
 	return true
 end
 
@@ -138,6 +152,30 @@ function S.dispatch(name, value)
 	local response, dispatch_error = ipc.request(
 		source_config.command_socket,
 		("/dispatch workspace %d"):format(value))
+	if not response then
+		return false, dispatch_error
+	end
+	if response ~= "" and not response:match "^ok" then
+		return false, response
+	end
+	return true
+end
+
+function S.move_window(address, workspace)
+	if type(address) ~= "string" or
+		not address:match "^0x[%da-fA-F]+$" then
+		return false, "window address is invalid"
+	end
+	if type(workspace) ~= "string" or
+		workspace == "" or
+		workspace:find("[^%w_:%-%.]" ) then
+		return false, "workspace name is not safe for a typed dispatch"
+	end
+	local response, dispatch_error = ipc.request(
+		source_config.command_socket,
+		("/dispatch movetoworkspacesilent %s,address:%s"):format(
+			workspace,
+			address))
 	if not response then
 		return false, dispatch_error
 	end

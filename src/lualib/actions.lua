@@ -8,6 +8,11 @@ local media_actions = {
 	previous = true,
 }
 
+local session_actions = {
+	restore = true,
+	save = true,
+}
+
 local function parse_integer(value)
 	if type(value) ~= "string" or not value:match "^%-?%d+$" then
 		return nil
@@ -20,6 +25,13 @@ local function parse_integer(value)
 end
 
 function M.from_cli(arguments)
+	if arguments[1] == "session" and session_actions[arguments[2]] and
+		#arguments == 2 then
+		return "dispatch session " .. arguments[2]
+	end
+	if session_actions[arguments[1]] and #arguments == 1 then
+		return "dispatch session " .. arguments[1]
+	end
 	if arguments[1] == "workspace" and arguments[2] == "switch" and
 		#arguments == 3 then
 		local workspace = parse_integer(arguments[3])
@@ -79,6 +91,14 @@ function M.parse(command)
 		return {
 			domain = "media",
 			name = media,
+		}
+	end
+
+	local session = command:match "^dispatch session ([%a%-]+)$"
+	if session and session_actions[session] then
+		return {
+			domain = "session",
+			name = session,
 		}
 	end
 

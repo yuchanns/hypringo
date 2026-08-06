@@ -12,6 +12,7 @@ local sources = {
 	{ "hypringo.hyprland", "src/lualib/hyprland.lua" },
 	{ "hypringo.remote", "src/lualib/remote.lua" },
 	{ "hypringo.runtime", "src/lualib/runtime.lua" },
+	{ "hypringo.session", "src/lualib/session.lua" },
 	{ "hypringo.state", "src/lualib/state.lua" },
 	{ "service.actions", "src/service/actions.lua" },
 	{ "service.audio", "src/service/audio.lua" },
@@ -21,6 +22,7 @@ local sources = {
 	{ "service.main", "src/service/main.lua" },
 	{ "service.state", "src/service/state.lua" },
 	{ "service.system", "src/service/system.lua" },
+	{ "service.session", "src/service/session.lua" },
 	{ "service.weather", "src/service/weather.lua" },
 }
 

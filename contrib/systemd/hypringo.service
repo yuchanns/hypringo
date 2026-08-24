@@ -3,13 +3,12 @@ Description=Hypringo desktop orchestration service
 Documentation=https://github.com/yuchanns/hypringo
 PartOf=graphical-session.target
 After=graphical-session.target
-StartLimitIntervalSec=0
+StartLimitIntervalSec=30
+StartLimitBurst=5
 
 [Service]
 Type=simple
 ExecStartPre=%h/.local/bin/hypringo --check-config
-ExecStartPre=/usr/bin/sleep 10
-ExecStartPre=%h/.local/bin/hypringo-hyprland-ready
 ExecStart=%h/.local/bin/hypringo
 ExecReload=%h/.local/bin/hypringo reload
 Restart=on-failure

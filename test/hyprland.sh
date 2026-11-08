@@ -209,7 +209,7 @@ dispatch_result=$(
 )
 assert_contains "$dispatch_result" '"type":"accepted"' "workspace dispatch was rejected"
 count=0
-while ! grep -Fxq '/dispatch workspace 8' "$command_request_log"; do
+while ! grep -Fxq '/dispatch hl.dsp.focus({workspace=8})' "$command_request_log"; do
 	if ! kill -0 "$daemon_pid" 2>/dev/null; then
 		cat "$daemon_log" >&2
 		exit 1
@@ -226,7 +226,7 @@ negative_dispatch=$(
 )
 assert_contains "$negative_dispatch" '"type":"accepted"' "negative workspace dispatch was rejected"
 count=0
-while ! grep -Fxq '/dispatch workspace -3' "$command_request_log"; do
+while ! grep -Fxq '/dispatch hl.dsp.focus({workspace=-3})' "$command_request_log"; do
 	if ! kill -0 "$daemon_pid" 2>/dev/null; then
 		cat "$daemon_log" >&2
 		exit 1

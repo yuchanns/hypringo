@@ -4,7 +4,7 @@ set -eu
 request=$(cat)
 printf '%s\n' "$request" >>"$FAKE_HYPRLAND_REQUEST_LOG"
 case "$request" in
-	/dispatch\ workspace\ *)
+	/dispatch\ hl.dsp.focus\(*)
 		printf 'ok'
 		;;
 	j/activewindow)

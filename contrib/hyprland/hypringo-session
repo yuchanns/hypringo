@@ -28,8 +28,7 @@ hyprctl -j monitors |
 				--outputs "$monitor_name"
 			;;
 		HDMI-A-2)
-			hyprctl keyword monitor \
-				"$monitor_name,preferred,0x0,1" >/dev/null
+			hyprctl eval 'hl.monitor({output="HDMI-A-2", mode="preferred", position="0x0", scale=1})' >/dev/null
 			swww img \
 				"$HOME/.config/hypr/assets/wallpapers/background_03.jpg" \
 				--outputs "$monitor_name"

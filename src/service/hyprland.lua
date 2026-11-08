@@ -151,7 +151,7 @@ function S.dispatch(name, value)
 	end
 	local response, dispatch_error = ipc.request(
 		source_config.command_socket,
-		("/dispatch workspace %d"):format(value))
+		("/dispatch hl.dsp.focus({workspace=%d})"):format(value))
 	if not response then
 		return false, dispatch_error
 	end
@@ -173,9 +173,9 @@ function S.move_window(address, workspace)
 	end
 	local response, dispatch_error = ipc.request(
 		source_config.command_socket,
-		("/dispatch movetoworkspacesilent %s,address:%s"):format(
+		("/dispatch hl.dsp.window.move({workspace=%q,window=%q,follow=false})"):format(
 			workspace,
-			address))
+			"address:" .. address))
 	if not response then
 		return false, dispatch_error
 	end

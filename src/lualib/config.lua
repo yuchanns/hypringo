@@ -332,6 +332,11 @@ function M.load(path)
 		50,
 		1,
 		100)
+	if github.gh_auth == nil then
+		github.gh_auth = false
+	elseif type(github.gh_auth) ~= "boolean" then
+		error("configuration field sources.github.gh_auth must be a boolean")
+	end
 	github.token_env = github.token_env or "HYPRINGO_GITHUB_TOKEN"
 	if type(github.token_env) ~= "string" or
 		not github.token_env:match "^[A-Za-z_][A-Za-z0-9_]*$" then

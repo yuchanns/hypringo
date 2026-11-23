@@ -22,7 +22,7 @@ The current runtime provides:
 - A local Unix control socket with `status`, `doctor`, `subscribe`, and typed actions.
 - Complete Eww snapshot subscriptions and multi-monitor bar lifecycle management.
 - Automatic Hyprland session capture and restore with per-window skip isolation.
-- A native C/Lua runtime with no shell, `curl`, `gh`, or desktop-command polling.
+- A native C/Lua runtime for desktop state and HTTP, with optional GitHub CLI credential recovery.
 
 ## Installation
 
@@ -203,8 +203,21 @@ systemctl --user reload hypringo.service
 hypringo doctor
 ```
 
-The GitHub token is read only from the environment variable named by
-`token_env`; it is never written to configuration, logs, or session snapshots.
+The GitHub token is read from the environment variable named by `token_env`.
+Optionally set `sources.github.gh_auth = true` to use `gh auth token --hostname
+github.com` when that variable is absent. This requires `gh` and GNU `timeout`.
+Run Hypringo directly via the standard unit; the legacy `hypringo-github-start`
+wrapper is not needed for this mode.
+
+Credential lookup runs in the GitHub source, so a locked keyring does not stop
+other sources. Each lookup times out after 5 seconds (with a 1-second forced-kill
+grace period). Missing credentials retry every `sources.github.retry_min_ms`
+(default 5000), without the HTTP failure backoff. A successful credential is
+cached in memory; HTTP 401 discards that cache so a new login can recover.
+Explicit environment credentials take precedence. Network and rate-limit
+failures continue using the normal HTTP backoff.
+
+Tokens are never written to configuration, logs, or session snapshots.
 Do not put a GitHub token in `config.lua` or a systemd unit file.
 
 ## Development and validation
@@ -218,6 +231,7 @@ build/bin/unit test/unit.lua
 sh test/control.sh build/bin/hypringo
 sh test/reload.sh build/bin/hypringo
 sh test/lifecycle.sh build/bin/hypringo
+python3 test/github-auth.py build/bin/hypringo
 sh test/remote.sh build/bin/hypringo
 sh test/hyprland.sh build/bin/hypringo
 sh test/mpris.sh build/bin/hypringo build/bin/mpris_mock

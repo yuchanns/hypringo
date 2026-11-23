@@ -23,6 +23,7 @@ return {
 		},
 		github = {
 			enabled = false,
+			-- gh_auth = true, -- Retry gh credentials until the keyring is ready.
 		},
 		weather = {
 			enabled = false,

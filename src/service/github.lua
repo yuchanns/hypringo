@@ -10,6 +10,7 @@ local wait_message, wake_fd = ltask.eventinit()
 
 local deadline = 0
 local etag
+local gh_token
 local failures = 0
 local last_success_at = 0
 local stopping = false
@@ -29,9 +30,9 @@ local function schedule(delay_ms, now_centiseconds)
 	deadline = now_centiseconds + (delay_ms + 9) // 10
 end
 
-local function fail(message, headers, now, now_centiseconds)
+local function fail(message, headers, now, now_centiseconds, retry_ms)
 	failures = failures + 1
-	local delay = remote.failure_delay(
+	local delay = retry_ms or remote.failure_delay(
 		headers,
 		failures,
 		source_config,
@@ -46,8 +47,41 @@ local function fail(message, headers, now, now_centiseconds)
 	ltask.log.error("GitHub refresh failed", message, "retry_ms", delay)
 end
 
+-- gh may be unavailable until the desktop keyring is unlocked. Only this
+-- source waits for it, and both the command and credential retry are bounded.
+local function read_gh_token()
+	local pipe = io.popen(
+		"timeout --kill-after=1s 5s gh auth token --hostname github.com 2>/dev/null",
+		"r")
+	if not pipe then
+		return nil
+	end
+	local token = pipe:read("*a")
+	local succeeded = pipe:close()
+	if not succeeded or not token then
+		return nil
+	end
+	token = token:match("^%s*(.-)%s*$")
+	if token == "" or #token > 4096 or token:find("[%s%c]") then
+		return nil
+	end
+	return token
+end
+
 local function request_headers()
 	local token = os.getenv(source_config.token_env)
+	if (not token or token == "") and source_config.gh_auth then
+		if not gh_token then
+			local ok, value = pcall(read_gh_token)
+			if ok then
+				gh_token = value
+			end
+		end
+		token = gh_token
+		if not token then
+			return nil, "GitHub CLI credential unavailable; waiting for gh login or keyring"
+		end
+	end
 	if not token or token == "" then
 		return nil, ("environment variable %s is not set"):format(
 			source_config.token_env)
@@ -66,7 +100,9 @@ end
 local function refresh(now, now_centiseconds)
 	local headers, header_error = request_headers()
 	if not headers then
-		fail(header_error, nil, now, now_centiseconds)
+		now, now_centiseconds = ltask.now()
+		fail(header_error, nil, now, now_centiseconds,
+			source_config.gh_auth and source_config.retry_min_ms or nil)
 		return
 	end
 	local called, response, request_error = pcall(http.request, {
@@ -103,6 +139,10 @@ local function refresh(now, now_centiseconds)
 		return
 	end
 	if response.status < 200 or response.status >= 300 then
+		if response.status == 401 then
+			gh_token = nil
+			etag = nil
+		end
 		fail(
 			("GitHub HTTP status %d"):format(response.status),
 			response.headers,
@@ -159,10 +199,13 @@ end
 function S.reload(new_config)
 	local old_url = source_config.url
 	local old_token_env = source_config.token_env
+	local old_gh_auth = source_config.gh_auth
 	source_config = new_config.sources.github
 	if source_config.url ~= old_url or
-		source_config.token_env ~= old_token_env then
+		source_config.token_env ~= old_token_env or
+		source_config.gh_auth ~= old_gh_auth then
 		etag = nil
+		gh_token = nil
 	end
 	local _, now_centiseconds = ltask.now()
 	deadline = now_centiseconds
